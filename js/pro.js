@@ -60,15 +60,15 @@ function tracked(name, fn) {
 function blob(...keys) {
   if (!Remote.on) return;
   Remote.pushes++;
-  keys.forEach(k => { if (!Remote.busy) Remote.q = Remote.q.filter(op => !(op.t === 'set' && op.k === k)); Remote.q.push({ t: 'set', k, v: S[k], _k: localStorage.getItem('wassi.token') || '' }); });
+  keys.forEach(k => { if (!Remote.busy) Remote.q = Remote.q.filter(op => !(op.t === 'set' && op.k === k)); Remote.q.push({ t: 'set', k, v: S[k], _k: localStorage.getItem(LS('wassi.token')) || '' }); });
   Remote.saveQ(); Remote.flush();
 }
 // Le serveur ne renvoie que les commandes modifiées depuis la dernière lecture : on les fusionne avec celles déjà connues.
 function mergeState(st) { const m = new Map(S.orders.map(o => [o.id, o])); (st.orders || []).forEach(o => m.set(o.id, o)); Object.assign(S, st, { orders: [...m.values()] }); upgrade(S); }
 // Premier branchement au serveur : propose d'y envoyer les vraies données déjà présentes sur cet appareil.
-function localBackup() { try { const d = JSON.parse(localStorage.getItem('wassi.demo3')); return d && d.importedAt && Array.isArray(d.orders) && d.orders.length ? d : null; } catch (e) { return null; } }
+function localBackup() { try { const d = JSON.parse(localStorage.getItem(LS('wassi.demo3'))); return d && d.importedAt && Array.isArray(d.orders) && d.orders.length ? d : null; } catch (e) { return null; } }
 function offerUpload(force) {
-  if (!Remote.on || !U || U.role !== 'ceo' || S.orders.length || V.modal || (!force && localStorage.getItem('wassi.noupload'))) return;
+  if (!Remote.on || !U || U.role !== 'ceo' || S.orders.length || V.modal || (!force && localStorage.getItem(LS('wassi.noupload')))) return;
   const d = localBackup(); if (!d) return;
   V.modal = { t: 'html', title: 'Envoyer vos données sur le serveur ?', html: () => `<p style="color:var(--ink-2);margin-bottom:14px">Le serveur est vide. Les données de cet appareil peuvent y être envoyées pour que toute l'équipe travaille dessus :<br><b>${d.orders.length} commandes · ${d.shops.length} boutiques · ${(d.stock || []).length} produits en stock</b>.</p>
     <div class="actions fill"><button class="btn line" data-a="upload-no">Plus tard</button><button class="btn primary" data-a="upload-yes">Envoyer maintenant</button></div>` };
@@ -188,7 +188,7 @@ function importOld(d) {
   (d.merchants || []).forEach(m => { const s = shopFor(m.name); bal[s.name] += +m.balance || 0; if (m.nextStorageFeeDate) s.storageDue = m.nextStorageFeeDate; });
   const orders = (d.orders || []).map((x, i) => { const at = ts(x.dateStr), ret = !!x.isRetour, closer = who(x.closeuse, 'closeuse');
     return { id: 'a' + x.id, ref: 'A' + (i + 1), shop: shopFor(x.marchand).name, client: 'Client', phone: '', product: String(x.produit || 'Produit').trim(), qty: +x.quantite || 1,
-      price: +x.prixMarchandise || 0, zone: String(x.lieu || '').trim() || 'Niamey', fee: +x.fraisLivraison || 0, feeExp: +x.fraisExpedition || 0, agence: x.agenceExp || '', note: '',
+      price: +x.prixMarchandise || 0, zone: String(x.lieu || '').trim() || PAYS.city, fee: +x.fraisLivraison || 0, feeExp: +x.fraisExpedition || 0, agence: x.agenceExp || '', note: '',
       status: ret ? 'annule' : 'livre', ...(ret ? { reason: 'Retour' } : { deliveredAt: at, validatedAt: at, cashIn: at }), driver: who(x.livreur, 'livreur'), closer,
       createdAt: at, transferred: true, stk: 'x', old: 1, history: [] }; });
   const moves = [];
@@ -222,7 +222,7 @@ function importFile(file) {
   return file.text().then(t => applyImport(JSON.parse(t))).catch(() => toast('Fichier non reconnu', 'Choisissez une sauvegarde Wassi (.json), de cette app ou de l\'ancienne.'));
 }
 
-/* ================= Carte de Niamey ================= */
+/* ================= Carte de la ville ================= */
 const GEO = { 'plateau': [13.5190, 2.1090], 'sonuci': [13.5480, 2.1010], 'bobiel': [13.5600, 2.0850], 'koubia': [13.5450, 2.0640], 'francophonie': [13.5460, 2.0900], 'harobanda': [13.4890, 2.0960],
   'niamey 2000': [13.5380, 2.1680], 'ryad': [13.5500, 2.0760], 'yantala': [13.5340, 2.0900], 'aeroport': [13.4860, 2.1720], 'tchangarey': [13.5740, 2.1050], 'lazaret': [13.5540, 2.1160],
   'koira kano': [13.5300, 2.0810], 'kouara kano': [13.5300, 2.0810], 'grand marche': [13.5145, 2.1170], 'katako': [13.5225, 2.1180], 'poudriere': [13.5100, 2.1350], 'banifandou': [13.5350, 2.1340],
@@ -233,7 +233,8 @@ const GEO = { 'plateau': [13.5190, 2.1090], 'sonuci': [13.5480, 2.1010], 'bobiel
   'lossa goungou': [13.5650, 2.0650], 'liberte': [13.5180, 2.1260], 'abidjan': [13.5220, 2.1290], 'nouveau marche': [13.5110, 2.1290], 'cite caisse': [13.5410, 2.1160], 'dan gao': [13.5350, 2.1450],
   'madina': [13.5280, 2.1350], 'garba do': [13.5250, 2.1500], 'cite fayçal': [13.5270, 2.1280], 'cite faycal': [13.5270, 2.1280], 'petit marche': [13.5140, 2.1100], 'stade': [13.5200, 2.1230],
   'rond point': [13.5160, 2.1140], 'palais': [13.5100, 2.1050], 'gare': [13.5170, 2.1410], 'expedition': [13.5170, 2.1410] };
-const GEO_KEYS = Object.keys(GEO).sort((a, b) => b.length - a.length), CENTER = [13.5150, 2.1150];
+if (PAYS.zones) { Object.keys(GEO).forEach(k => delete GEO[k]); PAYS.zones.forEach(z => { GEO[norm(z[0])] = [z[1], z[2]]; }); GEO.expedition = PAYS.center; }
+const GEO_KEYS = Object.keys(GEO).sort((a, b) => b.length - a.length), CENTER = PAYS.center.slice();
 function geo(zone) {                            // position approximative d'un quartier
   const z = norm(zone); for (const k of GEO_KEYS) if (z.includes(k)) return GEO[k];
   let h = 0; for (const c of z) h = (h * 31 + c.charCodeAt(0)) | 0;
@@ -263,7 +264,7 @@ function mapHtml(spots, dests) {
   return `<div class="map" id="map"><div class="map-layer" id="map-layer">${tiles.join('')}
       ${dests.map(o => `<span class="dest" style="${at(geo(o.zone))}" title="${esc(o.product + ' → ' + o.zone)}"></span>`).join('')}
       ${spots.map(s => `<button class="mpin ${s.live ? 'live' : ''} ${V.mapSel === s.u.id ? 'on' : ''}" style="${at(s.at)}" data-a="map-pick" data-id="${esc(s.u.id)}" aria-label="${esc(s.u.name)}"><i>${esc(initials(s.u.name))}</i><b>${esc(s.u.name)}${s.run.length ? ' · ' + s.run.length : ''}</b></button>`).join('')}</div>
-    <div class="map-ctl"><button data-a="map-zoom" data-id="1" aria-label="Zoomer">+</button><button data-a="map-zoom" data-id="-1" aria-label="Dézoomer">−</button><button data-a="map-zoom" data-id="0" aria-label="Recentrer sur Niamey">${ico('gps')}</button></div>
+    <div class="map-ctl"><button data-a="map-zoom" data-id="1" aria-label="Zoomer">+</button><button data-a="map-zoom" data-id="-1" aria-label="Dézoomer">−</button><button data-a="map-zoom" data-id="0" aria-label="Recentrer la carte">${ico('gps')}</button></div>
     <a class="map-att" href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">© OpenStreetMap</a></div>`;
 }
 function afterRender() {                        // déplacement de la carte au doigt ou à la souris
@@ -278,10 +279,10 @@ function afterRender() {                        // déplacement de la carte au d
 /* ---- Partage de position du livreur ---- */
 var Gps = {
   id: null, last: 0,
-  get on() { return localStorage.getItem('wassi.gps') === '1'; },
+  get on() { return localStorage.getItem(LS('wassi.gps')) === '1'; },
   start() {
     if (!navigator.geolocation) return toast('Position indisponible', 'Ce téléphone ne permet pas la localisation.');
-    localStorage.setItem('wassi.gps', '1'); if (this.id != null) return;
+    localStorage.setItem(LS('wassi.gps'), '1'); if (this.id != null) return;
     this.id = navigator.geolocation.watchPosition(p => {
       const now = Date.now(); if (!U || U.role !== 'livreur' || now - this.last < 20000) return; this.last = now;
       S.pos[U.id] = { lat: +p.coords.latitude.toFixed(5), lng: +p.coords.longitude.toFixed(5), at: now };
@@ -289,7 +290,7 @@ var Gps = {
     }, () => { this.stop(); toast('Position non partagée', 'Autorisez la localisation pour Wassi Delivery dans votre téléphone.'); render(); }, { enableHighAccuracy: true, maximumAge: 15000, timeout: 30000 });
   },
   pause() { if (this.id != null) navigator.geolocation.clearWatch(this.id); this.id = null; },
-  stop() { this.pause(); localStorage.removeItem('wassi.gps'); if (U && S.pos[U.id]) { delete S.pos[U.id]; Remote.push({ t: 'pos', id: U.id, p: null }); persist(); } }
+  stop() { this.pause(); localStorage.removeItem(LS('wassi.gps')); if (U && S.pos[U.id]) { delete S.pos[U.id]; Remote.push({ t: 'pos', id: U.id, p: null }); persist(); } }
 };
 
 /* ================= Actions ================= */
@@ -300,7 +301,9 @@ const drop = (k, id) => { S[k] = S[k].filter(x => x.id !== id); };
 Object.assign(A, {
   back: () => { if (history.state && history.state.w) history.back(); else if (!Nav.back()) toast('Premier écran', 'Il n\'y a pas d\'écran précédent.'); },
   undo: () => Undo.run(),
-  'upload-yes': () => doUpload(), 'upload-no': () => { localStorage.setItem('wassi.noupload', '1'); V.modal = null; renderModal(); }, 'upload-ask': () => offerUpload(true),
+  country: d => { if (!COUNTRIES[d.id]) return; localStorage.setItem('wassi.country', d.id); location.reload(); },
+  'country-change': () => { localStorage.removeItem('wassi.country'); V.modal = null; renderModal(); render(); },
+  'upload-yes': () => doUpload(), 'upload-no': () => { localStorage.setItem(LS('wassi.noupload'), '1'); V.modal = null; renderModal(); }, 'upload-ask': () => offerUpload(true),
   'w-prev': () => Nav.back(),
   more: () => { V.modal = { t: 'html', title: 'Plus', html: () => `<div class="grid">${TABS[U.role].slice(4).map(([id, l, ic]) => `<button class="btn block ${V.tab === id ? 'primary' : ''}" style="justify-content:flex-start" data-a="tab-m" data-id="${id}">${ico(ic)} ${l}${tabCount(id) ? ` <span class="badge st-conf">${tabCount(id)}</span>` : ''}</button>`).join('')}</div>` }; renderModal(); },
   'tab-m': d => { V.modal = null; renderModal(); Nav.go(d.id); },

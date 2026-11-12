@@ -71,6 +71,32 @@ const ZONES = { 'Plateau': 1500, 'Sonuci': 1500, 'Bobiel': 1500, 'Koubia': 1500,
   'Ryad': 1500, 'Yantala': 1500, 'Aéroport': 1800, 'Tchangarey': 1500, 'Lazaret': 1500, 'Koira Kano': 1500, 'Grand Marché': 1200, 'Katako': 1200,
   'Poudrière': 1200, 'Banifandou': 1500, 'Wadata': 1200, 'Boukoki': 1200, 'Dar Es Salam': 1500, 'Rive Droite': 1800, 'Recasement': 1500,
   'EXPEDITION MARADI': 1000, 'EXPEDITION AGADEZ': 1000, 'EXPEDITION TAHOUA': 1000, 'EXPEDITION ZINDER': 1000, 'EXPEDITION DOSSO': 1000, 'EXPEDITION DIFFA': 1000 };
+// ---- Pays : chaque filiale a ses propres données, ses quartiers, son indicatif et sa carte.
+// Chaque quartier : [nom, latitude, longitude] (position approximative, pour la carte).
+const COUNTRIES = {
+  ne: { name: 'Niger', city: 'Niamey', dial: '+227', center: [13.5150, 2.1150] },
+  ci: { name: "Côte d'Ivoire", city: 'Abidjan', dial: '+225', center: [5.3450, -4.0100], exp: ['Bouaké', 'Yamoussoukro', 'San-Pédro', 'Korhogo', 'Daloa', 'Man'],
+    zones: [['Plateau', 5.323, -4.020], ['Cocody', 5.354, -3.985], ['Riviera', 5.355, -3.950], ['Angré', 5.395, -3.985], ['Deux Plateaux', 5.375, -3.995], ['Yopougon', 5.340, -4.085],
+      ['Marcory', 5.300, -3.985], ['Zone 4', 5.290, -3.975], ['Treichville', 5.300, -4.010], ['Koumassi', 5.297, -3.950], ['Port-Bouët', 5.255, -3.940], ['Adjamé', 5.355, -4.025],
+      ['Attécoubé', 5.335, -4.040], ['Abobo', 5.420, -4.020], ['Bingerville', 5.355, -3.890], ['Anyama', 5.495, -4.050], ['Songon', 5.320, -4.250]] },
+  bj: { name: 'Bénin', city: 'Cotonou', dial: '+229', center: [6.3720, 2.4050], exp: ['Porto-Novo', 'Parakou', 'Abomey', 'Bohicon', 'Natitingou', 'Ouidah'],
+    zones: [['Akpakpa', 6.365, 2.455], ['Cadjehoun', 6.355, 2.395], ['Fidjrossè', 6.350, 2.365], ['Gbégamey', 6.365, 2.415], ['Haie Vive', 6.358, 2.400], ['Zogbo', 6.385, 2.395],
+      ['Agla', 6.375, 2.370], ['Godomey', 6.385, 2.340], ['Calavi', 6.450, 2.355], ['Ganhi', 6.352, 2.435], ['Jéricho', 6.368, 2.428], ['Saint-Michel', 6.365, 2.432],
+      ['Dantokpa', 6.372, 2.435], ['Sainte-Rita', 6.378, 2.410], ['Vèdoko', 6.380, 2.400], ['Sèmè', 6.380, 2.560]] },
+  ga: { name: 'Gabon', city: 'Libreville', dial: '+241', center: [0.4050, 9.4650], exp: ['Port-Gentil', 'Franceville', 'Oyem', 'Lambaréné', 'Mouila', 'Moanda'],
+    zones: [['Centre-ville', 0.392, 9.452], ['Louis', 0.410, 9.445], ['Glass', 0.375, 9.455], ['Akébé', 0.385, 9.465], ['Nombakélé', 0.385, 9.450], ['Mont-Bouët', 0.395, 9.460],
+      ['Batterie IV', 0.420, 9.440], ['Charbonnages', 0.430, 9.450], ['Nzeng-Ayong', 0.420, 9.495], ['PK5', 0.400, 9.490], ['PK8', 0.415, 9.520], ['PK12', 0.430, 9.550],
+      ['Lalala', 0.355, 9.475], ['Oloumi', 0.370, 9.465], ['Owendo', 0.300, 9.500], ['Okala', 0.470, 9.410], ['Angondjé', 0.510, 9.400], ['Akanda', 0.530, 9.380]] }
+};
+const CC = COUNTRIES[localStorage.getItem('wassi.country')] ? localStorage.getItem('wassi.country') : 'ne';
+const PAYS = COUNTRIES[CC];
+// Ce qui est enregistré sur l'appareil est rangé par pays (le Niger garde les noms d'origine).
+const LS = k => CC === 'ne' ? k : k + '.' + CC;
+if (PAYS.zones) {
+  Object.keys(ZONES).forEach(k => delete ZONES[k]);
+  PAYS.zones.forEach(z => { ZONES[z[0]] = 1500; });
+  PAYS.exp.forEach(t => { ZONES['EXPEDITION ' + t.toUpperCase()] = 1000; });
+}
 const AGENCES = ['STM', 'RIMBO', 'AMANA', 'SALIM TRANSPORT'];
 const isExp = z => /^exp[ée]dition/i.test(z || '');
 const CATALOG = {
@@ -120,7 +146,7 @@ function seed() {
     const closer = pick(closers), driver = pick(drivers);
     const o = {
       id: 'o' + (++n), ref: 'W' + n, shop, client: (fem ? pick(firstF) : pick(firstM)) + ' ' + pick(last),
-      phone: '+227 9' + Math.floor(r() * 10) + ' ' + pad2(Math.floor(r() * 100)) + ' ' + pad2(Math.floor(r() * 100)) + ' ' + pad2(Math.floor(r() * 100)),
+      phone: PAYS.dial + ' 9' + Math.floor(r() * 10) + ' ' + pad2(Math.floor(r() * 100)) + ' ' + pad2(Math.floor(r() * 100)) + ' ' + pad2(Math.floor(r() * 100)),
       sexe: fem ? 'F' : 'H', product, qty: r() < .12 ? 2 : 1, price, zone, fee: ZONES[zone],
       feeExp: isExp(zone) ? 1000 : 0, agence: isExp(zone) ? pick(AGENCES) : '', note: '', status,
       driver: null, closer: null, createdAt, transferred: false, sheetRow: n - 998,
@@ -181,15 +207,15 @@ const Remote = {
   get api() { const v = localStorage.getItem('wassi.api'); return v === 'off' ? '' : v || window.WASSI_API || ''; },
   get on() { return !!this.api; },
   q: [], busy: false, online: true, pushes: 0,
-  init() { try { this.q = JSON.parse(localStorage.getItem('wassi.q') || '[]'); } catch (e) { this.q = []; } },
-  saveQ() { localStorage.setItem('wassi.q', JSON.stringify(this.q)); },
+  init() { try { this.q = JSON.parse(localStorage.getItem(LS('wassi.q')) || '[]'); } catch (e) { this.q = []; } },
+  saveQ() { localStorage.setItem(LS('wassi.q'), JSON.stringify(this.q)); },
   async call(body, tok) {
     const res = await fetch(this.api, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({ ...body, token: tok || localStorage.getItem('wassi.token') || '' }) });
+      body: JSON.stringify({ ...body, c: CC, token: tok || localStorage.getItem(LS('wassi.token')) || '' }) });
     return res.json();
   },
   // Chaque modification garde le jeton de la personne qui l'a faite : elle part avec ses droits, même si quelqu'un d'autre se connecte ensuite.
-  push(op) { if (!this.on) return; this.pushes++; this.q.push({ ...op, _k: localStorage.getItem('wassi.token') || '' }); this.saveQ(); this.flush(); },
+  push(op) { if (!this.on) return; this.pushes++; this.q.push({ ...op, _k: localStorage.getItem(LS('wassi.token')) || '' }); this.saveQ(); this.flush(); },
   async flush() {
     if (this.busy || !this.q.length) return; this.busy = true;
     try {
@@ -206,17 +232,17 @@ const Remote = {
     if (!this.on || !U) return;
     await this.flush(); if (this.q.length) return render();
     try {
-      const mark = this.pushes, r = await this.call({ a: 'state', since: +localStorage.getItem('wassi.since') || 0 });
+      const mark = this.pushes, r = await this.call({ a: 'state', since: +localStorage.getItem(LS('wassi.since')) || 0 });
       // Une modification faite pendant la lecture est plus récente que la réponse : on relira au prochain passage.
       if (this.pushes !== mark || this.q.length) return;
       this.online = true;
-      if (r.ok) { mergeState(r.state); localStorage.setItem('wassi.since', r.now || 0); persist(); onExternal(); }
+      if (r.ok) { mergeState(r.state); localStorage.setItem(LS('wassi.since'), r.now || 0); persist(); onExternal(); }
       else if (r.error === 'auth') logout();
     } catch (e) { this.online = false; render(); }
   }
 };
 Remote.init();
-const KEY = () => Remote.on ? 'wassi.remote' : 'wassi.demo3';
+const KEY = () => LS(Remote.on ? 'wassi.remote' : 'wassi.demo3');
 let S = load();
 function load() {
   try { const raw = localStorage.getItem(KEY()); if (raw) { const d = JSON.parse(raw); if (d && d.v === 1) return upgrade(d); } } catch (e) {}
@@ -316,7 +342,7 @@ function simulate() {
   const z = Object.keys(ZONES)[Math.floor(Math.random() * 22)];
   const names = ['Aïcha Maïga', 'Moussa Garba', 'Hadiza Seyni', 'Ibrahim Djibo', 'Mariama Saley', 'Oumarou Adamou'], i = Math.floor(Math.random() * names.length);
   Biz.incoming({ shop, product, price, zone: z, client: names[i], sexe: i % 2 ? 'H' : 'F',
-    phone: '+227 9' + Math.floor(Math.random() * 10) + ' ' + pad2(Math.floor(Math.random() * 100)) + ' ' + pad2(Math.floor(Math.random() * 100)) + ' ' + pad2(Math.floor(Math.random() * 100)) });
+    phone: PAYS.dial + ' 9' + Math.floor(Math.random() * 10) + ' ' + pad2(Math.floor(Math.random() * 100)) + ' ' + pad2(Math.floor(Math.random() * 100)) + ' ' + pad2(Math.floor(Math.random() * 100)) });
 }
 
 /* ---- Indicateurs ---- */
@@ -345,7 +371,7 @@ const DONE = ['livre', 'livre_livreur'];
 const cashDue = id => S.orders.filter(o => o.driver === id && DONE.includes(o.status) && !o.cashIn);
 const net = l => sum(l, o => o.price - wfee(o));
 const teamDone = () => S.orders.filter(o => DONE.includes(o.status) && o.deliveredAt >= startOfDay()).length;
-const GOAL = () => Math.max(1, +(localStorage.getItem('wassi.goal') || 40));
+const GOAL = () => Math.max(1, +(localStorage.getItem(LS('wassi.goal')) || 40));
 const bounds = r => { const d = startOfDay(); return r === 'today' ? [d, d + DAY] : r === 'yesterday' ? [d - DAY, d] : r === '7' ? [d - 6 * DAY, d + DAY] : r === '30' ? [d - 29 * DAY, d + DAY] : r === 'exo' ? [exoStart(), d + DAY] : null; };
 const prevStats = r => { const b = bounds(r); if (!b) return null; const len = b[1] - b[0]; return stats(S.orders.filter(o => actT(o) >= b[0] - len && actT(o) < b[0])); };
 const delta = (a, b) => b ? `${a >= b ? '▲' : '▼'} ${Math.abs(pct(a - b, b))} % vs période précédente` : '';
@@ -360,7 +386,7 @@ const RANGE_ORDER = ['today', 'yesterday', '7', '30', 'exo', 'all'];
 
 /* ================= Notifications ================= */
 const forMe = n => U && n.by !== U.id && (n.toUser === U.id || (n.toRole === U.role && (!n.shop || n.shop === U.shop)));
-const readAt = () => +(localStorage.getItem('wassi.read.' + (U ? U.id : '')) || 0);
+const readAt = () => +(localStorage.getItem(LS('wassi.read.') + (U ? U.id : '')) || 0);
 const unread = () => S.notifs.filter(n => forMe(n) && n.at > readAt()).length;
 function beep() {
   try {
@@ -427,6 +453,7 @@ function tabCount(id) {
 function render() {
   if (!localStorage.getItem('wassi.welcomed') && (!U || V.replay)) return renderWelcome();
   V.replay = false;
+  if (!localStorage.getItem('wassi.country')) return renderCountry();
   if (U && !U.preview) { const me = user(U.id); if (!me || me.status === 'pending' || me.gone) kick('Votre accès a été retiré. Contactez le CEO de Wassi Delivery.'); else U = me; }
   if (!U) return renderAuth();
   const tabs = TABS[U.role]; if (!tabs.some(t => t[0] === V.tab)) V.tab = tabs[0][0];
@@ -435,7 +462,7 @@ function render() {
   $('#app').innerHTML = `<div class="shell">
     <header class="top"><button class="icon-btn back" data-a="back" aria-label="Retour à l'écran précédent">${ico('back')}</button>
       <img src="icons/icon-96.png" alt="" width="38" height="38">
-      <div class="who"><b>WASSI DELIVERY</b><span>${esc(U.name)} · ${ROLES[U.role]}</span></div>
+      <div class="who"><b>WASSI DELIVERY</b><span>${flag(CC)}${esc(U.name)} · ${ROLES[U.role]} · ${esc(PAYS.name)}</span></div>
       ${Undo.stack.length ? `<button class="btn sm undo" data-a="undo" aria-label="Annuler la dernière action">${ico('undo')}<span>Annuler</span></button>` : ''}
       <button class="icon-btn" data-a="bell" aria-label="Notifications">${ico('bell')}${nb ? `<span class="dot">${nb}</span>` : ''}</button>
       <button class="icon-btn" data-a="theme" aria-label="Changer le thème clair ou sombre">${ico('sun')}</button>
@@ -596,7 +623,7 @@ function orderSheet(o) {
   const showContact = U.role !== 'marchand';
   return `<div class="sheet-head"><div style="flex:1"><div class="l1" style="display:flex;gap:8px;align-items:center;margin-bottom:6px"><span class="tag">${esc(o.shop)}</span>${badge(o)}<small style="color:var(--ink-3)">${esc(o.ref)}</small></div>
       <h3>${esc(o.client)}</h3></div>${closeBtn()}</div>
-    ${showContact ? `<div class="actions fill">${call(o)}${wa(o)}${U.role === 'livreur' && !isExp(o.zone) ? `<a class="btn sm line" target="_blank" rel="noopener" href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(o.zone + ', Niamey')}">Itinéraire</a>` : ''}</div>
+    ${showContact ? `<div class="actions fill">${call(o)}${wa(o)}${U.role === 'livreur' && !isExp(o.zone) ? `<a class="btn sm line" target="_blank" rel="noopener" href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(o.zone + ', ' + PAYS.city)}">Itinéraire</a>` : ''}</div>
       <div class="chips" style="margin-top:10px">${[['confirm', 'Message : confirmation'], ['route', 'Message : livreur en route'], ['miss', 'Message : injoignable']].map(([k, t]) => `<a class="chip" target="_blank" rel="noopener" href="${esc(waLink(o, k))}">${ico('chat')}${t}</a>`).join('')}</div>` : ''}
     ${isDup(o) && edit ? `<div class="warn" style="margin-top:10px">${ico('alert')}Doublon possible : même numéro et même produit dans les 3 derniers jours.</div>` : ''}
     ${o.reason ? `<div class="warn" style="margin-top:10px">${ico('alert')}${esc(o.reason)}</div>` : ''}
@@ -628,7 +655,7 @@ const A = {
   logout: () => logout(), tab: d => Nav.go(d.id),
   theme: () => { const r = document.documentElement, dark = r.dataset.theme ? r.dataset.theme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
     r.dataset.theme = dark ? 'light' : 'dark'; localStorage.setItem('wassi.theme', r.dataset.theme); },
-  bell: () => { V.modal = { t: 'notifs' }; localStorage.setItem('wassi.read.' + U.id, Date.now()); render(); },
+  bell: () => { V.modal = { t: 'notifs' }; localStorage.setItem(LS('wassi.read.') + U.id, Date.now()); render(); },
   open: d => { V.modal = { t: 'order', id: d.id }; renderModal(); },
   close: () => { V.modal = null; renderModal(); }, 'close-bg': (d, el, e) => { if (e.target === el) A.close(); },
   simulate, reset: () => { if (confirm('Remettre les données de démonstration à zéro ?')) { S = seed(); persist(); render(); } },
@@ -637,7 +664,7 @@ const A = {
   status: d => { const o = order(d.id); if (d.s === 'reporte') { V.modal = { t: 'retry', id: o.id, prev: V.modal }; return renderModal(); } if (o.status !== d.s) Biz.setStatus(o, d.s); },
   retry: d => { const o = order(d.id), n = +d.n; o.retryAt = n ? startOfDay() + n * DAY + 9 * 3600e3 : Date.now() + 2 * 3600e3; V.modal = { t: 'order', id: o.id };
     Biz.setStatus(o, 'reporte', n ? 'Rappel prévu le ' + dmy(o.retryAt) : 'Rappel prévu dans 2 h'); },
-  'order-add': () => form('Saisir une commande', [{ k: 'shop', l: 'Boutique', opts: S.shops.map(s => [s.name, s.name]) }, { k: 'client', l: 'Nom du client' }, { k: 'phone', l: 'Téléphone', ph: '+227 …' },
+  'order-add': () => form('Saisir une commande', [{ k: 'shop', l: 'Boutique', opts: S.shops.map(s => [s.name, s.name]) }, { k: 'client', l: 'Nom du client' }, { k: 'phone', l: 'Téléphone', ph: PAYS.dial + ' …' },
     { k: 'product', l: 'Produit' }, { k: 'price', l: 'Montant à encaisser (F)', n: 1 }, { k: 'qty', l: 'Quantité', n: 1, v: '1' }, { k: 'zone', l: 'Lieu de livraison', opts: Object.keys(ZONES).map(z => [z, z]) },
     { k: 'sexe', l: 'Client', opts: [['F', 'Femme'], ['H', 'Homme']] }],
     v => { const price = parseInt(v.price, 10); if (!v.client.trim() || digits(v.phone).length < 8 || !v.product.trim() || !(price > 0)) return 'Nom, téléphone, produit et montant sont obligatoires.';
@@ -645,7 +672,7 @@ const A = {
   'cash-in': d => { const l = cashDue(d.id), amt = sum(l, o => o.price); if (!l.length || !confirm(`Confirmer que ${uname(d.id)} a remis ${F(amt)} ?`)) return; const at = Date.now();
     l.forEach(o => { o.cashIn = at; o.history.push({ at, by: U.name, text: 'Argent remis à la caisse' }); Remote.push({ t: 'order', o }); });
     notify({ toUser: d.id, title: 'Versement reçu', text: `${F(amt)} bien reçus par ${U.name}. Merci !` }); commit(); toast('Versement enregistré', `${uname(d.id)} · ${F(amt)}`); },
-  'goal-save': () => { const g = parseInt($('#goal').value, 10); if (!(g > 0)) return toast('À corriger', 'Entrez un nombre de livraisons.'); localStorage.setItem('wassi.goal', g); toast('Objectif enregistré', g + ' livraisons par jour.'); render(); },
+  'goal-save': () => { const g = parseInt($('#goal').value, 10); if (!(g > 0)) return toast('À corriger', 'Entrez un nombre de livraisons.'); localStorage.setItem(LS('wassi.goal'), g); toast('Objectif enregistré', g + ' livraisons par jour.'); render(); },
   backup: () => download(`wassi-sauvegarde-${today()}.json`, JSON.stringify(S), 'application/json'),
   restore: () => $('#restore').click(),
   'w-next': () => { if ((V.slide || 0) < SLIDES.length - 1) { V.slide = (V.slide || 0) + 1; renderWelcome(); } else A['w-skip'](); },
@@ -668,7 +695,7 @@ const A = {
   install: async () => { if (deferredInstall) { deferredInstall.prompt(); deferredInstall = null; render(); } },
   'api-save': () => { const v = $('#api').value.trim(); if (v && !/^https:\/\/script\.google\.com\/.+\/exec$/.test(v)) return toast('Adresse invalide', 'Elle doit commencer par https://script.google.com/ et finir par /exec.');
     v ? localStorage.setItem('wassi.api', v) : localStorage.removeItem('wassi.api'); location.reload(); },
-  'api-off': () => { if (confirm('Déconnecter cet appareil du serveur et revenir aux données de démonstration ?')) { localStorage.setItem('wassi.api', 'off'); localStorage.removeItem('wassi.token'); location.reload(); } },
+  'api-off': () => { if (confirm('Déconnecter cet appareil du serveur et revenir aux données de démonstration ?')) { localStorage.setItem('wassi.api', 'off'); localStorage.removeItem(LS('wassi.token')); location.reload(); } },
   'shop-plan': d => { const s = S.shops.find(x => x.id === d.id); s.plan = s.plan === 'actif' ? 'essai' : 'actif'; syncCfg(); },
   'shop-trial': d => { const s = S.shops.find(x => x.id === d.id); s.trialEnd = Math.max(Date.now(), s.trialEnd) + 30 * DAY; syncCfg(); },
   'shop-sheet': d => { const s = S.shops.find(x => x.id === d.id); form('Google Sheet de ' + s.name, [{ k: 'sheetId', l: 'Lien ou identifiant du Google Sheet', v: s.sheetId, ph: 'https://docs.google.com/spreadsheets/d/…' }], v => { s.sheetId = sheetId(v.sheetId); syncCfg(); }); },

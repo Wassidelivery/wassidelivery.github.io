@@ -10,6 +10,7 @@
  *  2. Menu Extensions > Apps Script. Effacez tout, collez ce fichier, enregistrez.
  *  3. Choisissez la fonction « setup » puis Exécuter, et acceptez les autorisations.
  *     Cinq onglets sont créés : Commandes, Utilisateurs, Boutiques, Notifs, Données.
+ *     Un Google Sheet « WASSI HUB — <pays> » est aussi créé pour chaque autre pays (Côte d'Ivoire, Bénin, Gabon).
  *     Le compte CEO est créé avec l'adresse du compte Google utilisé ; son mot de passe
  *     provisoire est écrit dans l'onglet Utilisateurs, colonne « pass » : changez-le
  *     ensuite dans l'app (Réglages > Mon compte).
@@ -42,9 +43,22 @@ const STAFF = ['ceo', 'assistante', 'closeuse', 'livreur'];
 // Qui a le droit de remplacer chaque liste.
 const BLOBS = { stock: STAFF, takes: STAFF, moves: ['ceo', 'assistante'], goals: ['ceo'], charges: ['ceo'] };
 
-// Identifiant du Google Sheet « WASSI HUB » (la partie de son adresse entre /d/ et /edit).
+// Un Google Sheet par pays. Celui du Niger est le « WASSI HUB » d'origine ; ceux des autres pays sont
+// créés par la fonction setup, qui garde leur identifiant dans les propriétés du script.
 const HUB_ID = '1Z31xZ6i3K28adEzrne8omfiCavNmGURlcW2kMmgSLLg';
-function book() { return HUB_ID ? SpreadsheetApp.openById(HUB_ID) : SpreadsheetApp.getActiveSpreadsheet(); }
+const COUNTRY_NAMES = { ne: 'Niger', ci: "Côte d'Ivoire", bj: 'Bénin', ga: 'Gabon' };
+let CC = 'ne';                                    // pays de l'appel en cours
+const BOOKS = {};
+function hubId(c) { return c === 'ne' && HUB_ID ? HUB_ID : PropertiesService.getScriptProperties().getProperty('hub_' + c); }
+function book() {
+  if (!BOOKS[CC]) { const id = hubId(CC); if (!id) throw new Error('pays'); BOOKS[CC] = SpreadsheetApp.openById(id); }
+  return BOOKS[CC];
+}
+function eachCountry(fn) {                        // exécute fn pour chaque pays installé, puis revient au pays de départ
+  const back = CC;
+  try { Object.keys(COUNTRY_NAMES).forEach(function (c) { if (!hubId(c)) return; CC = c; ORDER_ROWS = null; fn(c); }); }
+  finally { CC = back; ORDER_ROWS = null; }
+}
 function tab(k) { return book().getSheetByName(TAB[k]); }
 function rows(k) {
   const sh = tab(k), n = sh.getLastRow();
@@ -62,18 +76,31 @@ function sha(s) {
 function code() { return String(Math.floor(100000 + Math.random() * 900000)); }
 
 function setup() {
-  const ss = book();
-  Object.keys(TAB).forEach(function (k) {
-    const sh = ss.getSheetByName(TAB[k]) || ss.insertSheet(TAB[k]);
-    sh.getRange(1, 1, 1, HEAD[k].length).setValues([HEAD[k]]).setFontWeight('bold');
-    sh.setFrozenRows(1);
+  const props = PropertiesService.getScriptProperties();
+  Object.keys(COUNTRY_NAMES).forEach(function (c) {
+    if (!hubId(c)) props.setProperty('hub_' + c, SpreadsheetApp.create('WASSI HUB — ' + COUNTRY_NAMES[c]).getId());
   });
-  tab('users').getRange('E:E').setNumberFormat('@');           // les codes restent du texte
-  tab('data').getRange('B:B').setNumberFormat('@');
+  eachCountry(function () {
+    const ss = book();
+    Object.keys(TAB).forEach(function (k) {
+      const sh = ss.getSheetByName(TAB[k]) || ss.insertSheet(TAB[k]);
+      sh.getRange(1, 1, 1, HEAD[k].length).setValues([HEAD[k]]).setFontWeight('bold');
+      sh.setFrozenRows(1);
+    });
+    tab('users').getRange('E:E').setNumberFormat('@');           // les codes restent du texte
+    tab('data').getRange('B:B').setNumberFormat('@');
+  });
+  CC = 'ne';
   if (!rows('users').length) {
     const mail = Session.getEffectiveUser().getEmail() || 'ceo@wassi.app';
     tab('users').appendRow(['u_ceo', 'CEO', 'ceo', mail.toLowerCase(), code(), '', '', '{}']);
   }
+  // Le compte du CEO est le même dans tous les pays : il est recopié dans les Sheets qui n'ont encore aucun compte.
+  const ceos = rows('users').filter(function (u) { return String(u.role) === 'ceo'; });
+  eachCountry(function (c) {
+    if (c === 'ne' || rows('users').length) return;
+    ceos.forEach(function (u) { tab('users').appendRow(HEAD.users.map(function (k) { return u[k]; })); });
+  });
   ScriptApp.getProjectTriggers().forEach(function (t) { if (t.getHandlerFunction() === 'importAll') ScriptApp.deleteTrigger(t); });
   ScriptApp.newTrigger('importAll').timeBased().everyMinutes(1).create();
 }
@@ -116,6 +143,8 @@ function setBlob(k, v) {
 function doGet() { return out({ ok: true, app: 'WASSI DELIVERY' }); }
 function doPost(e) {
   let b; try { b = JSON.parse(e.postData.contents); } catch (err) { return out({ ok: false, error: 'json' }); }
+  CC = COUNTRY_NAMES[b.c] ? b.c : 'ne'; ORDER_ROWS = null;
+  if (!hubId(CC)) return out({ ok: false, error: 'pays' });
   try {
     if (b.a === 'login') return out(login(b));
     if (b.a === 'signup') return out(locked(function () { return signup(b); }));
@@ -134,11 +163,11 @@ function out(o) { return ContentService.createTextOutput(JSON.stringify(o)).setM
 function okPass(u, p) { return u.ph ? u.ph === sha(p) : (!!u.pass && String(u.pass) === String(p)); }
 function token(u) {
   const t = Utilities.getUuid() + Utilities.getUuid();
-  PropertiesService.getScriptProperties().setProperty('tok_' + t, u.id);
+  PropertiesService.getScriptProperties().setProperty('tok_' + t, CC + '|' + u.id);
   return t;
 }
 function login(b) {
-  const email = String(b.email || '').trim().toLowerCase(), props = PropertiesService.getScriptProperties(), key = 'fail_' + email;
+  const email = String(b.email || '').trim().toLowerCase(), props = PropertiesService.getScriptProperties(), key = 'fail_' + CC + '_' + email;
   const fails = parse(props.getProperty(key), { n: 0, at: 0 });
   if (fails.n >= 5 && Date.now() - fails.at < 10 * 60000) return { ok: false, error: 'locked' };
   const u = users().filter(function (x) { return x.email && x.email === email; })[0];
@@ -152,8 +181,11 @@ function login(b) {
 }
 function auth(t) {
   if (!t) return null;
-  const id = PropertiesService.getScriptProperties().getProperty('tok_' + t);
-  if (!id) return null;
+  const v = PropertiesService.getScriptProperties().getProperty('tok_' + t);
+  if (!v) return null;
+  // Un jeton n'est valable que dans le pays où la personne s'est connectée.
+  const parts = v.indexOf('|') < 0 ? ['ne', v] : [v.slice(0, v.indexOf('|')), v.slice(v.indexOf('|') + 1)], id = parts[1];
+  if (parts[0] !== CC) return null;
   const u = users().filter(function (x) { return x.id === id; })[0];
   return u && !u.gone && u.status !== 'pending' ? u : null;      // un membre retiré est déconnecté tout de suite
 }
@@ -179,9 +211,13 @@ function signup(b) {
 }
 function changePass(me, b) {
   if (!okPass(me, b.old) || String(b.pass || '').length < 6) return { ok: false, error: 'pass' };
-  const r = rows('users').filter(function (x) { return String(x.id) === me.id; })[0];
-  me.ph = sha(b.pass); delete me.pass;
-  tab('users').getRange(r._row, 1, 1, HEAD.users.length).setValues([userRow(me)]);
+  const ph = sha(b.pass), write = function (u) {
+    const r = rows('users').filter(function (x) { return String(x.id) === u.id; })[0];
+    u.ph = ph; delete u.pass; tab('users').getRange(r._row, 1, 1, HEAD.users.length).setValues([userRow(u)]);
+  };
+  // Le CEO garde un seul mot de passe pour tous les pays.
+  if (me.role === 'ceo') eachCountry(function () { users().filter(function (u) { return u.role === 'ceo' && u.email === me.email; }).forEach(write); });
+  else write(me);
   return { ok: true };
 }
 
@@ -330,14 +366,17 @@ function importAll() {
     }
     if (!changed) props.setProperty('imp_full', String(now));
     props.setProperty('imp_at', String(now));
-    let next = tab('orders').getLastRow() + 1000;
-    rows('shops').forEach(function (shop) {
-      if (!shop.sheetId || (changed && !changed[String(shop.sheetId)])) return;
-      if (Date.now() - start > 40000) return;                         // on reprendra au prochain passage
-      try { next = importShop(shop, next); } catch (err) { console.error('import ' + shop.name + ' : ' + err); }
+    eachCountry(function () {
+      const shops = rows('shops').filter(function (shop) { return shop.sheetId && (!changed || changed[String(shop.sheetId)]); });
+      if (shops.length) {
+        let next = tab('orders').getLastRow() + 1000;
+        shops.forEach(function (shop) {
+          if (Date.now() - start > 40000) return;                     // on reprendra au prochain passage
+          try { next = importShop(shop, next); } catch (err) { console.error('import ' + shop.name + ' : ' + err); }
+        });
+      }
+      if (!changed) { const nn = tab('notifs').getLastRow(); if (nn > 700) tab('notifs').deleteRows(2, nn - 400); }   // on ne garde que les notifications récentes
     });
-    const nn = tab('notifs').getLastRow();                            // on ne garde que les notifications récentes
-    if (nn > 700) tab('notifs').deleteRows(2, nn - 400);
   } finally { lock.releaseLock(); }
 }
 function importShop(shop, next) {

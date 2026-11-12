@@ -228,6 +228,7 @@ function settingsView() {
     (pend.length ? `<div class="card" style="margin-bottom:12px;border-color:var(--gold)"><div class="card-h"><h3 class="tag">Demandes de compte à valider · ${pend.length}</h3></div>${pend.map(u => lrow(esc(u.contact || u.name), `${ROLES[u.role]}${u.shop ? ' · ' + esc(u.shop) : ''} · ${esc(u.email)}${u.phone ? ' · ' + esc(u.phone) : ''}`,
       `<button class="btn sm danger" data-a="user-no" data-id="${esc(u.id)}">Refuser</button><button class="btn sm ok" data-a="user-ok" data-id="${esc(u.id)}">Valider</button>`, av(u.name))).join('')}</div>` : '') +
     `<div class="grid g-2" style="align-items:start">
+    ${box('Pays', lrow(flag(CC) + ' ' + esc(PAYS.name), esc(PAYS.city) + ' · données séparées des autres pays', '<button class="btn sm line" data-a="country-change">Changer de pays</button>') + note('Votre e-mail et votre mot de passe de CEO fonctionnent dans tous les pays. Chaque pays a ses commandes, ses boutiques, son équipe et sa caisse.'))}
     ${box('Mon compte CEO', lrow(esc(U.name), esc(U.email || '')) + `<div class="actions"><button class="btn" data-a="my-email">Changer mon e-mail</button><button class="btn" data-a="my-pass">Changer mon mot de passe</button></div>${note('Votre e-mail et votre mot de passe ouvrent directement l\'espace CEO, sans choisir de rôle.')}`)}
     ${box(`Mise en route · ${steps.filter(x => x[0]).length} / ${steps.length}`, steps.map(([ok, t]) => `<div class="list-row"><span class="avatar" style="${ok ? 'background:var(--ok);color:#fff' : 'background:var(--surface-2);color:var(--ink-3)'}">${ico(ok ? 'check' : 'clock')}</span><div class="grow">${ok ? `<s style="color:var(--ink-3)">${t}</s>` : `<b>${t}</b>`}</div></div>`).join(''))}
     ${box('Sauvegarde et reprise de données', note('<b>Importer</b> accepte une sauvegarde de cette app ou le fichier .json de l\'ancienne application : livraisons, soldes, stocks, équipe, dépenses et caisse sont repris.') +
@@ -348,7 +349,7 @@ Object.assign(A, {
 
 /* ================= Démarrage ================= */
 (async function start() {
-  const saved = (Remote.on ? localStorage : sessionStorage).getItem('wassi.user');
+  const saved = (Remote.on ? localStorage : sessionStorage).getItem(LS('wassi.user'));
   U = (saved && user(saved)) || null;
   markSeen();
   render();

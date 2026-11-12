@@ -13,17 +13,25 @@ const byEmail = e => S.users.find(u => (u.email || '').toLowerCase() === String(
 const validEmail = e => /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(e);
 const checkPass = (u, p) => u.ph ? u.ph === hash(p) : !!u.pass && u.pass === p;
 
-function clearSession() { localStorage.removeItem('wassi.since'); sessionStorage.removeItem('wassi.user'); localStorage.removeItem('wassi.user'); localStorage.removeItem('wassi.token'); }
+function clearSession() { localStorage.removeItem(LS('wassi.since')); sessionStorage.removeItem(LS('wassi.user')); localStorage.removeItem(LS('wassi.user')); localStorage.removeItem(LS('wassi.token')); }
 function kick(msg) { U = null; clearSession(); Undo.stack = []; Nav.hist = []; V.modal = null; V.auth = { mode: 'login', msg }; }
 function logout() { if (window.Gps) Gps.pause(); kick(''); renderModal(); render(); }
 function enter(u) {
-  if (Remote.on) { localStorage.removeItem('wassi.since'); S.orders = []; }   // chaque rôle ne reçoit que ses commandes
+  if (Remote.on) { localStorage.removeItem(LS('wassi.since')); S.orders = []; }   // chaque rôle ne reçoit que ses commandes
   U = u; V.tab = null; V.sub = null; V.auth = { mode: 'login' }; Nav.hist = []; Undo.stack = []; markSeen();
-  (Remote.on ? localStorage : sessionStorage).setItem('wassi.user', u.id);
+  (Remote.on ? localStorage : sessionStorage).setItem(LS('wassi.user'), u.id);
   if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission().catch(() => {});
   render(); Remote.pull().then(() => offerUpload()); if (window.Gps && u.role === 'livreur' && Gps.on) Gps.start();
 }
 
+const flag = c => `<i class="flag flag-${c}" aria-hidden="true"></i>`;
+function renderCountry() {
+  $('#app').innerHTML = `<div class="login"><div class="login-box">
+    <div class="brand"><img src="icons/icon-192.png" alt="Logo Wassi Delivery" width="108" height="108"><h1>WASSI DELIVERY</h1><p>${SLOGAN}</p></div>
+    <div class="panel"><h2>Dans quel pays travaillez-vous ?</h2><p class="hint">Chaque pays a ses propres commandes, boutiques, équipes et caisse.</p>
+      <div class="roles">${Object.entries(COUNTRIES).map(([k, c]) => `<button class="role-card" data-a="country" data-id="${k}">${flag(k)}<span><b>${esc(c.name)}</b><small>${esc(c.city)} · ${c.dial}</small></span></button>`).join('')}</div>
+    </div></div></div>`;
+}
 function renderAuth() {
   const a = V.auth, h = new Date().getHours(), hi = h < 12 ? 'Bonjour' : h < 18 ? 'Bon après-midi' : 'Bonsoir';
   const msg = a.msg ? `<div class="auth-msg ${a.good ? 'good' : ''}">${ico(a.good ? 'check' : 'alert')}<span>${esc(a.msg)}</span></div>` : '';
@@ -38,7 +46,7 @@ function renderAuth() {
       ${shop ? inp('su-shop', 'Nom de votre boutique', 'text', 'autocomplete="organization"') : ''}
       ${inp('su-name', shop ? 'Votre nom' : 'Prénom et nom', 'text', 'autocomplete="name"')}
       ${inp('su-email', 'Adresse e-mail', 'email', 'autocomplete="email" inputmode="email"')}
-      ${inp('su-phone', 'Numéro WhatsApp', 'tel', 'autocomplete="tel" placeholder="+227 …"')}
+      ${inp('su-phone', 'Numéro WhatsApp', 'tel', 'autocomplete="tel" placeholder="${PAYS.dial} …"')}
       ${shop ? inp('su-pass', 'Créez votre mot de passe (6 caractères minimum)', 'password', 'autocomplete="new-password"') + inp('su-pass2', 'Répétez le mot de passe', 'password', 'autocomplete="new-password"') : ''}
       <button class="btn primary block" style="margin-top:16px" data-a="signup" data-enter>${shop ? 'Créer mon compte' : 'Envoyer ma demande'}</button>
       <div style="height:8px"></div>${back}`; }
@@ -54,7 +62,7 @@ function renderAuth() {
         `<button class="person" data-a="demo-login" data-id="${esc(u.id)}"><span class="avatar">${esc(initials(u.name))}</span><span>${esc(u.name)}<small>${ROLES[u.role]}</small></span></button>`).join('')}</div></div>` : ''}`; }
   $('#app').innerHTML = `<div class="login"><div class="login-box">
     <div class="brand"><img src="icons/icon-192.png" alt="Logo Wassi Delivery" width="108" height="108"><h1>WASSI DELIVERY</h1><p>${SLOGAN}</p></div>
-    <div class="panel">${body}</div></div></div>`;
+    <div class="panel"><button class="country-pill" data-a="country-change" aria-label="Changer de pays">${flag(CC)}<b>${esc(PAYS.name)}</b><span>Changer</span></button>${body}</div></div></div>`;
 }
 const authMsg = (msg, good) => { V.auth.msg = msg; V.auth.good = good; V.auth.v = {}; document.querySelectorAll('.panel input:not([type=password])').forEach(i => V.auth.v[i.id] = i.value); renderAuth(); };
 function authBack() {
@@ -71,7 +79,7 @@ async function doLogin() {
     try {
       const r = await Remote.call({ a: 'login', email, pass });
       if (!r.ok) return authMsg(r.error === 'pending' ? 'Votre compte attend la validation du CEO.' : r.error === 'locked' ? 'Trop d\'essais. Réessayez dans 10 minutes.' : 'E-mail ou mot de passe incorrect.');
-      localStorage.setItem('wassi.token', r.token); u = user(r.user.id); if (!u) { S.users.push(r.user); u = r.user; }
+      localStorage.setItem(LS('wassi.token'), r.token); u = user(r.user.id); if (!u) { S.users.push(r.user); u = r.user; }
     } catch (e) { return authMsg('Connexion impossible. Vérifiez votre connexion internet.'); }
   } else {
     u = byEmail(email);
@@ -94,7 +102,7 @@ async function doSignup() {
     try {
       const r = await Remote.call({ a: 'signup', role, name, email, phone, shop: shopName, pass });
       if (!r.ok) return authMsg(r.error === 'email' ? 'Un compte existe déjà avec cet e-mail.' : 'Création impossible pour le moment.');
-      if (r.token) { localStorage.setItem('wassi.token', r.token); S.users.push(r.user); return enter(r.user); }
+      if (r.token) { localStorage.setItem(LS('wassi.token'), r.token); S.users.push(r.user); return enter(r.user); }
       V.auth = { mode: 'sent' }; return renderAuth();
     } catch (e) { return authMsg('Connexion impossible. Vérifiez votre connexion internet.'); }
   }

@@ -367,3 +367,15 @@ pre.report { white-space: pre-wrap; font: 13px/1.5 ui-monospace, Consolas, monos
 .map-ctl button { width: 40px; height: 40px; border-radius: 12px; background: var(--surface); color: var(--ink); font-size: 20px; font-weight: 700; box-shadow: var(--shadow); display: grid; place-items: center; }
 .map-att { position: absolute; right: 6px; bottom: 4px; font-size: 10px; background: rgba(255,255,255,.85); color: #333; padding: 1px 5px; border-radius: 4px; z-index: 3; }
 @media (max-width: 600px) { .map { height: 340px; } }
+
+/* ---------- Pays ---------- */
+.flag { display: inline-block; width: 26px; height: 18px; border-radius: 3px; flex: none; vertical-align: -3px; margin-right: 6px; box-shadow: 0 0 0 1px rgba(0,0,0,.12); background-size: 100% 100%; }
+.role-card .flag { width: 44px; height: 30px; border-radius: 5px; margin: 0; }
+.flag-ne { background: radial-gradient(circle at 50% 50%, #E05206 0 14%, transparent 15%), linear-gradient(#E05206 0 33.300%, #fff 33.300% 66.600%, #0DB02B 66.600%); }
+.flag-ci { background: linear-gradient(90deg, #F77F00 0 33.300%, #fff 33.300% 66.600%, #009E60 66.600%); }
+.flag-bj { background: linear-gradient(90deg, #008751 0 40%, transparent 40%), linear-gradient(#FCD116 0 50%, #E8112D 50%); }
+.flag-ga { background: linear-gradient(#009E60 0 33.300%, #FCD116 33.300% 66.600%, #3A75C4 66.600%); }
+.top .who .flag { width: 18px; height: 12px; vertical-align: -1px; margin-right: 5px; }
+.country-pill { display: flex; align-items: center; gap: 2px; width: 100%; padding: 8px 12px; margin-bottom: 14px; border-radius: 12px; background: var(--surface-2); font-size: 13.500px; }
+.country-pill b { flex: 1; text-align: left; }
+.country-pill span { color: var(--gold-ink); font-weight: 700; }
