@@ -522,24 +522,26 @@ function marketAdd(me, b) {
 /* ---------- Notifications sur le téléphone, même quand l'app est fermée (Web Push) ----------
  * Le serveur prévient le service de notifications du téléphone (Google, Apple, Mozilla), signé avec la clé
  * de Wassi. Le téléphone réveille alors l'app, qui vient chercher ici le texte à afficher. */
-const EC = { p: 0xffffffff00000001000000000000000000000000ffffffffffffffffffffffffn, n: 0xffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551n,
-  g: [0x6b17d1f2e12c4247f8bce6e563a440f277037d812deb33a0f4a13945d898c296n, 0x4fe342e2fe1a7f9b8ee7eb4a7c0f9e162bce33576b315ececbb6406837bf51f5n] };
-function mod(a, m) { const r = a % m; return r < 0n ? r + m : r; }
+// (L'éditeur Apps Script n'accepte pas l'écriture abrégée des grands nombres : ils passent par BigInt().)
+const N0 = BigInt(0), N1 = BigInt(1), N2 = BigInt(2), N3 = BigInt(3), N8 = BigInt(8), N255 = BigInt(255);
+const EC = { p: BigInt('0xffffffff00000001000000000000000000000000ffffffffffffffffffffffff'), n: BigInt('0xffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551'),
+  g: [BigInt('0x6b17d1f2e12c4247f8bce6e563a440f277037d812deb33a0f4a13945d898c296'), BigInt('0x4fe342e2fe1a7f9b8ee7eb4a7c0f9e162bce33576b315ececbb6406837bf51f5')] };
+function mod(a, m) { const r = a % m; return r < N0 ? r + m : r; }
 function inv(a, m) {
-  let lm = 1n, hm = 0n, low = mod(a, m), high = m;
-  while (low > 1n) { const q = high / low, nm = hm - lm * q, nw = high - low * q; hm = lm; high = low; lm = nm; low = nw; }
+  let lm = N1, hm = N0, low = mod(a, m), high = m;
+  while (low > N1) { const q = high / low, nm = hm - lm * q, nw = high - low * q; hm = lm; high = low; lm = nm; low = nw; }
   return mod(lm, m);
 }
 function ecAdd(P, Q) {
   if (!P) return Q; if (!Q) return P;
   const p = EC.p; let l;
-  if (P[0] === Q[0]) { if (mod(P[1] + Q[1], p) === 0n) return null; l = mod((3n * P[0] * P[0] - 3n) * inv(2n * P[1], p), p); }
+  if (P[0] === Q[0]) { if (mod(P[1] + Q[1], p) === N0) return null; l = mod((N3 * P[0] * P[0] - N3) * inv(N2 * P[1], p), p); }
   else l = mod((Q[1] - P[1]) * inv(mod(Q[0] - P[0], p), p), p);
   const x = mod(l * l - P[0] - Q[0], p); return [x, mod(l * (P[0] - x) - P[1], p)];
 }
-function ecMul(k, P) { let R = null, A = P; while (k > 0n) { if (k & 1n) R = ecAdd(R, A); A = ecAdd(A, A); k >>= 1n; } return R; }
-function b2n(bytes) { let x = 0n; for (let i = 0; i < bytes.length; i++) x = (x << 8n) | BigInt(bytes[i] & 255); return x; }
-function n2b(x, len) { const o = []; for (let i = len - 1; i >= 0; i--) { const v = Number(x & 255n); o[i] = v > 127 ? v - 256 : v; x >>= 8n; } return o; }
+function ecMul(k, P) { let R = null, A = P; while (k > N0) { if ((k & N1) === N1) R = ecAdd(R, A); A = ecAdd(A, A); k = k >> N1; } return R; }
+function b2n(bytes) { let x = N0; for (let i = 0; i < bytes.length; i++) x = (x << N8) | BigInt(bytes[i] & 255); return x; }
+function n2b(x, len) { const o = []; for (let i = len - 1; i >= 0; i--) { const v = Number(x & N255); o[i] = v > 127 ? v - 256 : v; x = x >> N8; } return o; }
 function b64u(bytes) { return Utilities.base64EncodeWebSafe(bytes).replace(/=+$/, ''); }
 function utf8(s) { return Utilities.newBlob(s).getBytes(); }
 function hmac(key, data) { return Utilities.computeHmacSha256Signature(data, key); }
@@ -549,7 +551,7 @@ function ecSign(msg, d) {                         // signature ECDSA P-256, nonc
   K = hmac(K, V.concat([0], x, h1)); V = hmac(K, V); K = hmac(K, V.concat([1], x, h1)); V = hmac(K, V);
   for (;;) {
     V = hmac(K, V); const k = b2n(V);
-    if (k > 0n && k < n) { const r = mod(ecMul(k, EC.g)[0], n), s2 = mod(inv(k, n) * (z + r * d), n); if (r > 0n && s2 > 0n) return n2b(r, 32).concat(n2b(s2, 32)); }
+    if (k > N0 && k < n) { const r = mod(ecMul(k, EC.g)[0], n), s2 = mod(inv(k, n) * (z + r * d), n); if (r > N0 && s2 > N0) return n2b(r, 32).concat(n2b(s2, 32)); }
     K = hmac(K, V.concat([0])); V = hmac(K, V);
   }
 }
@@ -557,7 +559,7 @@ function vapidKeys() {
   const props = PropertiesService.getScriptProperties();
   if (!props.getProperty('vapid_d')) {
     const seed = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, utf8(Utilities.getUuid() + Utilities.getUuid() + Date.now()));
-    const d = mod(b2n(seed), EC.n - 1n) + 1n, Q = ecMul(d, EC.g);
+    const d = mod(b2n(seed), EC.n - N1) + N1, Q = ecMul(d, EC.g);
     props.setProperty('vapid_pub', b64u([4].concat(n2b(Q[0], 32), n2b(Q[1], 32))));
     props.setProperty('vapid_d', d.toString(16));
   }
