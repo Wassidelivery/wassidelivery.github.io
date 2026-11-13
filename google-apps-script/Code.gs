@@ -461,6 +461,8 @@ function diag() {
     const t1 = Date.now(); shops.forEach(function (s) { try { merchantSheet(s).getLastRow(); } catch (err) { console.log(c + ' ' + s.name + ' : ouverture impossible — ' + err); } });
     console.log(c + ' : ' + shops.length + ' Sheet(s) · lecture groupée ' + (t1 - t0) + ' ms, codes ' + r.map(function (x) { return x.getResponseCode(); }).join(',') + ' · lecture directe ' + (Date.now() - t1) + ' ms'
       + (r[0].getResponseCode() === 200 ? '' : ' · ' + r[0].getContentText().slice(0, 200)));
+    // La lecture groupée fonctionne : on la réactive tout de suite si elle avait été mise de côté.
+    if (r.every(function (x) { return x.getResponseCode() === 200; })) PropertiesService.getScriptProperties().deleteProperty('rest_off');
   });
 }
 function toTime(v) {                              // date d'une cellule : vraie date, « 12/11/2026 » ou « 2026-11-12 »
