@@ -47,6 +47,8 @@ const ICONS = {
   cash: '<rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="3"/>', plus: '<path d="M12 5v14M5 12h14"/>'
 };
 const ico = n => `<svg class="i" viewBox="0 0 24 24" aria-hidden="true">${ICONS[n] || ''}</svg>`;
+ICONS.eye = '<path d="M2 12s3.600-7 10-7 10 7 10 7-3.600 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/>';
+const eyeBtn = '<button type="button" class="eye" data-a="eye" aria-label="Afficher ou masquer le mot de passe">' + ico('eye') + '</button>';
 
 /* ================= Référentiels ================= */
 const SLOGAN = 'Aussitôt commandé, aussitôt livré.';
@@ -55,6 +57,9 @@ const ROLES = { ceo: 'CEO', assistante: 'Responsable des opérations', closeuse:
 const CLOSE_FEE = 1000;                         // service de closing Wassi, compté dans les frais de chaque livraison
 // Frais Wassi d'une livraison : livraison + expédition + closing (même règle que l'ancienne application).
 const wfee = o => (o.fee || 0) + (o.feeExp || 0) + (o.closer && !o.noClose ? CLOSE_FEE : 0);
+// Les frais ne comptent pour la boutique qu'une fois précisés par la responsable des opérations ou le CEO.
+const feeOk = o => !!(o.feeSet || o.old);
+const MONEY = () => !!U && (U.role === 'ceo' || U.role === 'assistante');
 const ST = {
   nouveau: { l: 'Nouveau', c: 'new', col: 'var(--info)' },
   confirme: { l: 'Confirmé', c: 'conf', col: 'var(--gold)' },
@@ -252,7 +257,8 @@ function load() {
 }
 // Complète une base enregistrée par une version précédente de l'app.
 function upgrade(d) {
-  ['stock', 'takes', 'moves', 'goals', 'charges', 'notifs', 'users', 'shops', 'orders'].forEach(k => { if (!Array.isArray(d[k])) d[k] = []; });
+  ['stock', 'takes', 'moves', 'goals', 'charges', 'notifs', 'users', 'shops', 'orders', 'dispatch'].forEach(k => { if (!Array.isArray(d[k])) d[k] = []; });
+  d.seen = d.seen || {};
   d.pos = d.pos || {}; d.cfg = d.cfg || {};
   return d;
 }
@@ -267,6 +273,9 @@ const markSeen = () => S.notifs.forEach(n => seen.add(n.id));
 const user = id => S.users.find(u => u.id === id);
 const uname = id => (user(id) || {}).name || '—';
 const order = id => S.orders.find(o => o.id === id);
+// Répartition du jour : à quelle closeuse la boutique est confiée (aucune = visible par toutes).
+const assignedTo = shop => { const d = S.dispatch.find(x => x.shop === shop), u = d && user(d.closer); return u && !u.gone ? u.id : null; };
+const shopMine = o => { const c = assignedTo(o.shop); return !c || c === U.id; };
 const byRole = r => S.users.filter(u => u.role === r && !u.gone && u.status !== 'pending');
 const shopOf = name => S.shops.find(s => s.name === name);
 
@@ -434,20 +443,21 @@ function renderWelcome() {
 const TABS = {
   closeuse: [['todo', 'À traiter', 'inbox'], ['run', 'En cours', 'truck'], ['check', 'À valider', 'check'], ['done', 'Terminé', 'list'], ['map', 'Carte', 'pin']],
   livreur: [['mine', 'À livrer', 'truck'], ['stock', 'Mon stock', 'box'], ['done', 'Livrées', 'check']],
-  assistante: [['resume', 'Résumé', 'home'], ['reports', 'Rapports', 'doc'], ['shops', 'Boutiques', 'shop'], ['drivers', 'Livreurs', 'truck'], ['map', 'Carte', 'pin']],
+  assistante: [['resume', 'Résumé', 'home'], ['dispatch', 'Répartition', 'users'], ['reports', 'Rapports', 'doc'], ['shops', 'Boutiques', 'shop'], ['drivers', 'Livreurs', 'truck'], ['map', 'Carte', 'pin']],
   ceo: [['dash', 'Tableau', 'home'], ['perf', 'Performance', 'chart'], ['money', 'Caisse', 'cash'], ['shops', 'Boutiques', 'shop'], ['drivers', 'Livreurs', 'truck'],
-    ['orders', 'Commandes', 'list'], ['reports', 'Rapports', 'doc'], ['map', 'Carte', 'pin'], ['settings', 'Réglages', 'gear']],
+    ['dispatch', 'Répartition', 'users'], ['accounts', 'Comptes', 'lock'], ['orders', 'Commandes', 'list'], ['reports', 'Rapports', 'doc'], ['map', 'Carte', 'pin'], ['settings', 'Réglages', 'gear']],
   marchand: [['over', 'Suivi', 'truck'], ['compte', 'Compte', 'cash'], ['stats', 'Statistiques', 'chart'], ['stock', 'Stock', 'box'], ['orders', 'Commandes', 'list']]
 };
 function tabCount(id) {
   const mine = o => !o.closer || o.closer === U.id || U.role !== 'closeuse';
   if (U.role === 'closeuse') {
-    if (id === 'todo') return S.orders.filter(o => o.status === 'nouveau' || (isDue(o) && mine(o))).length;
+    if (id === 'todo') return S.orders.filter(o => (o.status === 'nouveau' && shopMine(o)) || (isDue(o) && mine(o))).length;
     if (id === 'run') return S.orders.filter(o => ['confirme', 'assigne'].includes(o.status) && mine(o)).length;
-    if (id === 'check') return S.orders.filter(o => o.status === 'livre_livreur').length;
+    if (id === 'check') return S.orders.filter(o => o.status === 'livre_livreur' && shopMine(o)).length;
   }
   if (U.role === 'livreur' && id === 'mine') return S.orders.filter(o => o.status === 'assigne' && o.driver === U.id).length;
   if (U.role === 'ceo' && id === 'settings') return S.users.filter(u => u.status === 'pending').length;
+  if (MONEY() && (id === 'resume' || id === 'money')) return S.orders.filter(o => o.status === 'livre' && !feeOk(o)).length;
   return 0;
 }
 function render() {
@@ -604,11 +614,11 @@ function renderModal() {
   if (m.t === 'report') body = `<div class="sheet-head"><h3>${esc(m.title)}</h3>${closeBtn()}</div><pre class="report" id="rep">${esc(m.text)}</pre>
     <div class="actions fill" style="margin-top:12px"><button class="btn" data-a="rep-copy">Copier</button><a class="btn primary" target="_blank" rel="noopener" href="https://wa.me/?text=${encodeURIComponent(m.text)}">${ico('chat')} Envoyer sur WhatsApp</a></div>`;
   if (m.t === 'notifs') { const l = S.notifs.filter(forMe).sort((a, b) => b.at - a.at).slice(0, 40);
-    body = `<div class="sheet-head"><h3>Notifications</h3>${closeBtn()}</div>${l.length ? l.map(n => `<div class="list-row" ${n.orderId && order(n.orderId) ? `data-a="open" data-id="${esc(n.orderId)}" style="cursor:pointer"` : ''}>
+    body = `<div class="sheet-head"><h3>Notifications</h3>${closeBtn()}</div>${pushHint()}${l.length ? l.map(n => `<div class="list-row" ${n.orderId && order(n.orderId) ? `data-a="open" data-id="${esc(n.orderId)}" style="cursor:pointer"` : ''}>
       <div class="grow"><b>${esc(n.title)}</b><small>${esc(n.text)}</small></div><small class="num" style="color:var(--ink-3)">${ago(n.at)}</small></div>`).join('') : empty('Aucune notification')}`; }
   if (m.t === 'form') body = `<div class="sheet-head"><h3>${esc(m.title)}</h3>${closeBtn()}</div>${m.fields.map(f => `<label class="field"><span>${esc(f.l)}</span>${f.opts ?
       `<select class="input" data-f="${f.k}">${f.opts.map(([v, t]) => `<option value="${esc(v)}" ${String(v) === String(f.v ?? '') ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select>` :
-      `<input class="input" data-f="${f.k}" value="${esc(f.v || '')}" placeholder="${esc(f.ph || '')}" type="${f.t || 'text'}" ${f.n ? 'inputmode="numeric"' : ''} autocomplete="${f.t === 'password' ? 'new-password' : 'off'}">`}</label>`).join('')}
+      `<input class="input" data-f="${f.k}" value="${esc(f.v || '')}" placeholder="${esc(f.ph || '')}" type="${f.t || 'text'}" ${f.n ? 'inputmode="numeric"' : ''} autocomplete="${f.t === 'password' ? 'new-password' : 'off'}">${f.t === 'password' ? eyeBtn : ''}`}</label>`).join('')}
     ${m.note ? `<p class="hint" style="margin-top:10px;color:var(--ink-2);font-size:13px">${esc(m.note)}</p>` : ''}
     <div class="actions fill" style="margin-top:16px"><button class="btn line" data-a="back">Retour</button><button class="btn primary" data-a="form-ok">${esc(m.ok || 'Enregistrer')}</button></div>`;
   if (m.t === 'html') body = `<div class="sheet-head"><h3>${esc(m.title)}</h3>${closeBtn()}</div>${m.html()}`;
@@ -616,6 +626,15 @@ function renderModal() {
   const s = root.querySelector('.sheet'); if (keep && s) s.scrollTop = top;
 }
 const closeBtn = () => `<button class="icon-btn" data-a="close" aria-label="Fermer">${ico('x')}</button>`;
+// Frais de livraison : visibles et modifiables seulement par la responsable des opérations et le CEO.
+function feeBlock(o) {
+  if (!MONEY()) return '';
+  return `<div class="section" style="margin-top:18px"><h3>Frais de livraison · ${feeOk(o) ? 'validés' : 'à préciser'}</h3>
+    <div class="kv"><label class="field" style="margin:0"><span>Frais de livraison (F)</span><input class="input num" inputmode="numeric" data-ch="fee" data-id="${esc(o.id)}" value="${esc(o.fee || 0)}"></label>
+      ${isExp(o.zone) ? `<label class="field" style="margin:0"><span>Frais d'expédition (F)</span><input class="input num" inputmode="numeric" data-ch="feeExp" data-id="${esc(o.id)}" value="${esc(o.feeExp || 0)}"></label>` : ''}</div>
+    <div class="chips wrap" style="margin-top:10px"><button class="chip ${o.noClose ? 'on' : ''}" data-a="noclose" data-id="${esc(o.id)}">Closing fait par la boutique</button></div>
+    <div class="actions" style="margin-top:10px;align-items:center"><b class="num" style="flex:1">Total des frais Wassi : ${F(wfee(o))}</b>${feeOk(o) ? '<span class="badge st-ok">Frais validés</span>' : act('fee-ok', o.id, 'Valider ces frais', 'primary')}</div></div>`;
+}
 function orderSheet(o) {
   if (!o) return `<div class="sheet-head"><h3>Commande introuvable</h3>${closeBtn()}</div>`;
   const edit = ['closeuse', 'ceo'].includes(U.role), drv = U.role === 'livreur' && o.driver === U.id && o.status === 'assigne';
@@ -628,7 +647,7 @@ function orderSheet(o) {
     ${isDup(o) && edit ? `<div class="warn" style="margin-top:10px">${ico('alert')}Doublon possible : même numéro et même produit dans les 3 derniers jours.</div>` : ''}
     ${o.reason ? `<div class="warn" style="margin-top:10px">${ico('alert')}${esc(o.reason)}</div>` : ''}
     <div class="kv"><div><small>Produit</small><b>${esc(o.product)}${o.qty > 1 ? ' × ' + o.qty : ''}</b></div><div><small>Montant à encaisser</small><b class="num">${F(o.price)}</b></div>
-      <div><small>Lieu</small><b>${esc(o.zone)}</b></div><div><small>Frais Wassi</small><b class="num">${F(wfee(o))}</b></div>
+      <div><small>Lieu</small><b>${esc(o.zone)}</b></div>${MONEY() ? `<div><small>Frais Wassi${feeOk(o) ? '' : ' · à valider'}</small><b class="num">${F(wfee(o))}</b></div>` : U.role === 'marchand' ? `<div><small>Frais Wassi</small><b class="num">${feeOk(o) ? F(wfee(o)) : 'En attente'}</b></div>` : ''}
       ${showContact ? `<div><small>Téléphone</small><b class="num">${esc(o.phone)}</b></div>` : ''}<div><small>Livreur</small><b>${o.driver ? esc(uname(o.driver)) : '—'}</b></div></div>
     ${drv ? `<div class="actions fill" style="margin-top:14px">${act('problem', o.id, 'Problème', 'danger')}${act('delivered', o.id, ico('check') + ' Livré', 'ok')}</div>` : ''}
     ${U.role === 'livreur' && o.driver === U.id && o.status === 'livre_livreur' ? `<div class="actions fill" style="margin-top:14px">${act('undeliver', o.id, 'Erreur : pas encore livrée', 'danger')}</div>` : ''}
@@ -638,13 +657,12 @@ function orderSheet(o) {
     <div class="section" style="margin-top:18px"><h3>2 · Livreur ${o.driver ? '(touchez un autre nom pour changer)' : ''}</h3><div class="chips wrap">${byRole('livreur').map(d =>
       `<button class="chip ${o.driver === d.id ? 'on' : ''}" data-a="assign" data-id="${esc(o.id)}" data-d="${esc(d.id)}">${esc(d.name)} <small>${load(d.id)} en cours${inHand(d.id, o.shop, o.product) > 0 ? ' · ' + inHand(d.id, o.shop, o.product) + ' pcs en main' : ''}</small></button>`).join('')}</div></div>
     <div class="section" style="margin-top:18px"><h3>Détails</h3>
-      <div class="chips wrap">${[['F', 'Femme'], ['H', 'Homme']].map(([k, l]) => `<button class="chip ${o.sexe === k ? 'on' : ''}" data-a="sexe" data-id="${esc(o.id)}" data-s="${k}">${l}</button>`).join('')}<button class="chip ${o.noClose ? 'on' : ''}" data-a="noclose" data-id="${esc(o.id)}">Closing fait par la boutique</button></div>
+      <div class="chips wrap">${[['F', 'Femme'], ['H', 'Homme']].map(([k, l]) => `<button class="chip ${o.sexe === k ? 'on' : ''}" data-a="sexe" data-id="${esc(o.id)}" data-s="${k}">${l}</button>`).join('')}</div>
       <div class="kv"><label class="field" style="margin:0"><span>Lieu</span><select class="input" data-ch="zone" data-id="${esc(o.id)}">${[...new Set([o.zone, ...Object.keys(ZONES)])].map(z => `<option ${z === o.zone ? 'selected' : ''}>${esc(z)}</option>`).join('')}</select></label>
-        <label class="field" style="margin:0"><span>Frais de livraison (F)</span><input class="input num" inputmode="numeric" data-ch="fee" data-id="${esc(o.id)}" value="${esc(o.fee)}"></label>
-        ${isExp(o.zone) ? `<label class="field" style="margin:0"><span>Agence d'expédition</span><select class="input" data-ch="agence" data-id="${esc(o.id)}">${['', ...AGENCES].map(a => `<option ${a === (o.agence || '') ? 'selected' : ''}>${a}</option>`).join('')}</select></label>
-        <label class="field" style="margin:0"><span>Frais d'expédition (F)</span><input class="input num" inputmode="numeric" data-ch="feeExp" data-id="${esc(o.id)}" value="${esc(o.feeExp || 0)}"></label>` : ''}</div>
+        ${isExp(o.zone) ? `<label class="field" style="margin:0"><span>Agence d'expédition</span><select class="input" data-ch="agence" data-id="${esc(o.id)}">${['', ...AGENCES].map(a => `<option ${a === (o.agence || '') ? 'selected' : ''}>${a}</option>`).join('')}</select></label>` : ''}</div>
       <label class="field"><span>Note pour le livreur</span><textarea class="input" data-ch="note" data-id="${esc(o.id)}" placeholder="Repère, heure souhaitée…">${esc(o.note)}</textarea></label></div>` :
       (o.note && U.role !== 'marchand' ? `<div class="insight" style="margin-top:12px">${ico('chat')}<div>${esc(o.note)}</div></div>` : '')}
+    ${feeBlock(o)}
     <div class="section" style="margin-top:18px"><h3>Historique</h3><ul class="timeline">${o.history.slice().reverse().map(h => `<li><b>${esc(h.text)}</b><small>${esc(U.role === 'marchand' ? '' : h.by + ' · ')}${dmy(h.at).slice(0, 5)} à ${hm(h.at)}</small></li>`).join('')}</ul></div>`;
 }
 function form(title, fields, done, extra) { V.modal = { t: 'form', title, fields, done, prev: V.modal && V.modal.t === 'order' ? V.modal : null, ...extra }; renderModal(); const f = $('#modal [data-f]'); if (f) f.focus(); }
@@ -716,10 +734,11 @@ function onChange(e) {
   if (el.type === 'checkbox' && el.dataset.a) return A[el.dataset.a](el.dataset, el, e);
   if (el.id === 'restore' && el.files[0]) { const f = el.files[0]; el.value = ''; return importFile(f); }
   if (el.dataset.set) { V[el.dataset.set] = el.value; return render(); }
+  if (el.dataset.disp !== undefined) { V.disp[el.dataset.disp] = el.value; return render(); }
   const k = el.dataset.ch; if (!k) return;
   const o = order(el.dataset.id); if (!o) return;
   if (k === 'zone') { o.zone = el.value; o.fee = ZONES[el.value] ?? o.fee; o.feeExp = isExp(el.value) ? 1000 : 0; if (!isExp(el.value)) o.agence = ''; return commit(o, 'Lieu modifié : ' + el.value); }
-  if (k === 'fee' || k === 'feeExp') { o[k] = Math.max(0, parseInt(el.value, 10) || 0); return commit(o); }
+  if (k === 'fee' || k === 'feeExp') { if (!MONEY()) return; o[k] = Math.max(0, parseInt(el.value, 10) || 0); o.feeSet = true; return commit(o, 'Frais précisés : ' + F(wfee(o))); }
   o[k] = el.value; commit(o);
 }
 document.addEventListener('input', e => { if (e.target.dataset.in === 'q') { V.q = e.target.value; render(); } });

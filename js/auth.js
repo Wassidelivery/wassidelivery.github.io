@@ -15,12 +15,13 @@ const checkPass = (u, p) => u.ph ? u.ph === hash(p) : !!u.pass && u.pass === p;
 
 function clearSession() { localStorage.removeItem(LS('wassi.since')); sessionStorage.removeItem(LS('wassi.user')); localStorage.removeItem(LS('wassi.user')); localStorage.removeItem(LS('wassi.token')); }
 function kick(msg) { U = null; clearSession(); Undo.stack = []; Nav.hist = []; V.modal = null; V.auth = { mode: 'login', msg }; }
-function logout() { if (window.Gps) Gps.pause(); kick(''); renderModal(); render(); }
+function logout() { if (window.Gps) Gps.pause(); pushOff(); kick(''); renderModal(); render(); }
 function enter(u) {
   if (Remote.on) { localStorage.removeItem(LS('wassi.since')); S.orders = []; }   // chaque rôle ne reçoit que ses commandes
   U = u; V.tab = null; V.sub = null; V.auth = { mode: 'login' }; Nav.hist = []; Undo.stack = []; markSeen();
   (Remote.on ? localStorage : sessionStorage).setItem(LS('wassi.user'), u.id);
-  if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission().catch(() => {});
+  V.markets = null;
+  if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission().then(pushSetup).catch(() => {}); else pushSetup();
   render(); Remote.pull().then(() => offerUpload()); if (window.Gps && u.role === 'livreur' && Gps.on) Gps.start();
 }
 
@@ -36,7 +37,7 @@ function renderAuth() {
   const a = V.auth, h = new Date().getHours(), hi = h < 12 ? 'Bonjour' : h < 18 ? 'Bon après-midi' : 'Bonsoir';
   const msg = a.msg ? `<div class="auth-msg ${a.good ? 'good' : ''}">${ico(a.good ? 'check' : 'alert')}<span>${esc(a.msg)}</span></div>` : '';
   const back = `<button class="btn line block" data-a="back">${ico('back')} Retour</button>`;
-  const inp = (id, label, type, extra = '') => `<label class="field"><span>${label}</span><input class="input" id="${id}" type="${type}" value="${esc((a.v || {})[id] || '')}" ${extra}></label>`;
+  const inp = (id, label, type, extra = '') => `<label class="field"><span>${label}</span><input class="input" id="${id}" type="${type}" value="${esc((a.v || {})[id] || '')}" ${extra}>${type === 'password' ? eyeBtn : ''}</label>`;
   let body;
   if (a.mode === 'role') body = `<h2>Créer un compte</h2><p class="hint">Qui êtes-vous ? Choisissez votre rôle.</p>
     <div class="roles">${SIGN_ROLES.map(([k, l, ic, d]) => `<button class="role-card" data-a="au-role" data-id="${k}"><span class="avatar">${ico(ic)}</span><span><b>${l}</b><small>${d}</small></span></button>`).join('')}</div>
@@ -71,9 +72,12 @@ function authBack() {
   renderAuth(); return true;
 }
 
+// Pendant l'appel au serveur : le bouton le dit et ne peut pas être touché deux fois.
+const busyBtn = (a, text) => { const b = document.querySelector(`.panel [data-a="${a}"]`); if (b) { b.disabled = true; b.innerHTML = '<span class="spin"></span>' + text; } };
 async function doLogin() {
   const email = $('#au-email').value.trim().toLowerCase(), pass = $('#au-pass').value;
   if (!email || !pass) return authMsg('Entrez votre e-mail et votre mot de passe.');
+  busyBtn('login', 'Connexion en cours…');
   let u;
   if (Remote.on) {
     try {
@@ -98,6 +102,7 @@ async function doSignup() {
     if (pass.length < 6) return authMsg('Le mot de passe doit faire au moins 6 caractères.');
     if (pass !== $('#su-pass2').value) return authMsg('Les deux mots de passe ne sont pas identiques.');
   }
+  busyBtn('signup', role === 'marchand' ? 'Création du compte en cours…' : 'Envoi de la demande en cours…');
   if (Remote.on) {
     try {
       const r = await Remote.call({ a: 'signup', role, name, email, phone, shop: shopName, pass });

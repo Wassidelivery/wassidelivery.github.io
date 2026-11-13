@@ -24,13 +24,15 @@ VIEWS.closeuse = () => {
   if (V.tab === 'map') return mapView();
   const quick = (o, s, label) => `<button class="btn sm line" data-a="status" data-id="${esc(o.id)}" data-s="${s}">${label}</button>`;
   if (V.tab === 'todo') {
-    const l = S.orders.filter(o => o.status === 'nouveau').sort((a, b) => a.createdAt - b.createdAt);
+    const all = S.orders.filter(o => o.status === 'nouveau').sort((a, b) => a.createdAt - b.createdAt), myShops = S.dispatch.filter(d => d.closer === U.id).map(d => d.shop);
+    const l = all.filter(shopMine), mineL = l.filter(o => assignedTo(o.shop) === U.id), free = l.filter(o => !assignedTo(o.shop));
     const back = S.orders.filter(o => mine(o) && (isDue(o) || (['injoignable', 'reporte'].includes(o.status) && !o.retryAt && o.createdAt > sod - 2 * DAY))).sort((a, b) => isDue(b) - isDue(a) || b.createdAt - a.createdAt);
     const myDone = S.orders.filter(o => o.closer === U.id && DONE.includes(o.status) && o.deliveredAt >= sod).length;
     const acts = o => call(o) + quick(o, 'injoignable', 'Injoignable') + act('confirm', o.id, ico('check') + ' Confirmer', 'primary');
-    return hero(l.length ? `${l.length} nouvelle(s) commande(s) vous attendent.` : 'Tout est traité, beau travail.', myDone, share('closeuse')) +
+    return hero((myShops.length ? `Vos boutiques du jour : ${myShops.map(esc).join(', ')}. ` : S.dispatch.length ? 'Aucune boutique ne vous est attribuée aujourd\'hui. ' : '') + (l.length ? `${l.length} nouvelle(s) commande(s) vous attendent.` : 'Tout est traité, beau travail.'), myDone, share('closeuse')) +
       head('À traiter', 'Appelez, confirmez, puis choisissez le livreur : 3 gestes par commande', `<button class="btn" data-a="order-add">${ico('plus')} Saisir une commande</button>`) +
-      (grid(l, o => card(o, acts(o))) || empty('Tout est traité', 'Les nouvelles commandes des Google Sheets arrivent ici.')) +
+      (myShops.length ? (grid(mineL, o => card(o, acts(o))) || empty('Rien à traiter dans vos boutiques', 'Les nouvelles commandes de vos boutiques arrivent ici.')) + (free.length ? `<div class="section"><h3>Boutiques non réparties · ${free.length}</h3>${grid(free, o => card(o, acts(o)))}</div>` : '')
+        : (grid(l, o => card(o, acts(o))) || empty('Tout est traité', 'Les nouvelles commandes des Google Sheets arrivent ici.'))) +
       (back.length ? `<div class="section"><h3>À rappeler (injoignables / reportées)</h3>${grid(back, o => card(o, acts(o)))}</div>` : '');
   }
   if (V.tab === 'run') {
@@ -42,7 +44,7 @@ VIEWS.closeuse = () => {
       (!a.length && !b.length ? empty('Rien en cours') : '');
   }
   if (V.tab === 'check') {
-    const l = S.orders.filter(o => o.status === 'livre_livreur').sort((x, y) => x.deliveredAt - y.deliveredAt);
+    const l = S.orders.filter(o => o.status === 'livre_livreur' && shopMine(o)).sort((x, y) => x.deliveredAt - y.deliveredAt);
     return head('À valider', 'Livraisons déclarées par les livreurs', l.length > 1 ? `<button class="btn primary" data-a="validate-all">${ico('check')} Tout valider (${l.length})</button>` : '') +
       (grid(l, o => card(o, act('validate', o.id, ico('check') + ' Valider livré', 'ok'))) || empty('Aucune livraison à valider', 'Dès qu\'un livreur marque « livré », la commande apparaît ici.'));
   }
@@ -94,7 +96,7 @@ function resumeView() {
   const people = f => { const g = group(l, f).sort((x, y) => y.n - x.n); return g.length ? g.map((x, i) => lrow(esc(uname(x.k)), `${sp(x.cash)} F encaissés`, `<b class="num">${x.n} livraison${x.n > 1 ? 's' : ''}</b>`, av(uname(x.k), i))).join('') : empty('Aucune livraison'); };
   return (isToday ? hero(`${base.length} livraison(s) validée(s) aujourd'hui · ${run} en cours · ${wait} à valider par les closeuses.`, teamDone(), GOAL()) : '') +
     head('Résumé du jour', 'Tout ce qui a été livré, par qui, pour qui', `<div class="actions"><button class="btn" data-a="dep-add">${ico('plus')} Dépense</button><button class="btn primary" data-a="eod-day">${ico('doc')} Résumé à envoyer</button></div>`) +
-    dayPicker() + shopChips(base) +
+    feeQueue() + '<div style="height:14px"></div>' + dayPicker() + shopChips(base) +
     `<div class="kpis" style="margin:14px 0">${kpi('Livraisons', l.length, V.shop || 'toutes les boutiques', true)}${kpi('Ventes encaissées', F(ventes))}${kpi('Frais Wassi', F(frais))}${kpi('Gain des boutiques', F(ventes - frais))}${kpi('Dépenses du jour', F(sum(dep, m => m.amt)), dep.length + ' ligne(s)')}</div>
     <div class="grid g-2">${box('Livreurs', people(o => o.driver))}${box('Closeuses', people(o => o.closer))}</div>
     <div class="section"><div class="actions" style="margin-bottom:12px">${searchBox('Produit, lieu, boutique…')}
@@ -102,16 +104,18 @@ function resumeView() {
       ${V.shop ? `<button class="btn primary" data-a="report" data-id="${esc(V.shop)}">${ico('doc')} Rapport ${esc(V.shop)}</button>` : ''}</div>` +
     (l.length ? `<div class="table-wrap"><table><thead><tr><th>Heure</th><th>Boutique</th><th>Produit</th><th>Lieu</th><th class="r">Montant</th><th class="r">Frais Wassi</th><th>Livreur</th><th>Closeuse</th></tr></thead><tbody>
       ${l.slice(0, 300).map(o => `<tr data-a="open" data-id="${esc(o.id)}"><td class="num">${o.old ? '—' : hm(actT(o))}</td><td><span class="tag">${esc(o.shop)}</span></td><td>${esc(o.product)}${o.qty > 1 ? ' × ' + o.qty : ''}</td><td>${esc(o.zone)}</td>
-        <td class="r num"><b>${fmt(o.price)}</b></td><td class="r num">${fmt(wfee(o))}</td><td>${esc(uname(o.driver))}</td><td>${esc(uname(o.closer))}</td></tr>`).join('')}</tbody></table></div>` : empty('Aucune livraison ce jour-là', 'Les livraisons validées par les closeuses arrivent ici automatiquement.')) + '</div>';
+        <td class="r num"><b>${fmt(o.price)}</b></td><td class="r num">${feeOk(o) ? fmt(wfee(o)) : '<span class="badge st-check">à préciser</span>'}</td><td>${esc(uname(o.driver))}</td><td>${esc(uname(o.closer))}</td></tr>`).join('')}</tbody></table></div>` : empty('Aucune livraison ce jour-là', 'Les livraisons validées par les closeuses arrivent ici automatiquement.')) + '</div>';
 }
 function reportsView() {
   const base = dayList(V.day), g = group(base, o => o.shop).sort((a, b) => b.n - a.n);
   const names = [...g.map(x => x.k), ...S.shops.map(s => s.name).filter(n => !g.some(x => x.k === n)).sort()];
   if (!names.includes(V.repShop)) V.repShop = names[0] || '';
+  const noFee = V.repShop ? S.orders.filter(o => o.shop === V.repShop && o.status === 'livre' && !feeOk(o) && actT(o) >= dayB(V.day)[0] && actT(o) < dayB(V.day)[1]).length : 0;
   const text = V.repShop ? reportText(V.repShop, V.day) : '', ph = shopPhone(V.repShop), i = g.findIndex(x => x.k === V.repShop), next = g[i + 1];
   return head('Rapports journaliers', 'Choisissez la date et la boutique : le rapport est prêt à envoyer') + dayPicker() +
     `<div class="grid g-2" style="align-items:start"><div class="card"><label class="field" style="margin:0"><span>E-commerçant</span><select class="input" data-set="repShop">${names.map(n => { const x = g.find(y => y.k === n);
         return `<option value="${esc(n)}" ${n === V.repShop ? 'selected' : ''}>${esc(n)}${x ? ` — ${x.n} livraison${x.n > 1 ? 's' : ''}` : ''}</option>`; }).join('')}</select></label>
+      ${noFee ? `<div class="insight alert" style="margin-top:12px">${ico('alert')}<div>${noFee} livraison(s) de cette boutique n'ont pas encore de frais validés : elles ne sont pas dans ce rapport. Validez-les dans Résumé.</div></div>` : ''}
       ${text ? `<pre class="report" style="margin-top:12px;max-height:none">${esc(text)}</pre>
       <div class="actions fill" style="margin-top:12px"><button class="btn" data-a="rep-copy2">Copier</button><a class="btn primary" target="_blank" rel="noopener" href="${esc(ph ? waTo(ph, text) : 'https://wa.me/?text=' + encodeURIComponent(text))}">${ico('chat')} Envoyer sur WhatsApp</a></div>
       ${next ? `<button class="btn line block" style="margin-top:8px" data-a="rep-pick" data-id="${esc(next.k)}">Boutique suivante : ${esc(next.k)} →</button>` : ''}` : empty('Aucune boutique')}</div>
@@ -169,7 +173,7 @@ function mapView(embed) {
   return (embed ? '' : head('Carte des livreurs', m ? 'Vos produits en cours de livraison' : 'Qui livre quoi, et où, en ce moment')) + mapHtml(spots, dests) +
     `<p class="hint" style="margin:8px 0 12px;color:var(--ink-3);font-size:12.500px">Rond doré : livreur. Point noir : adresse d'une livraison en cours. Les positions sont exactes quand le livreur partage sa position, sinon estimées d'après le quartier.</p><div class="grid g-2">${list}</div>`;
 }
-VIEWS.assistante = () => ({ resume: resumeView, reports: reportsView, shops: shopsView, drivers: driversView, map: mapView }[V.tab])();
+VIEWS.assistante = () => ({ resume: resumeView, dispatch: dispatchView, reports: reportsView, shops: shopsView, drivers: driversView, map: mapView }[V.tab])();
 
 /* ================= CEO ================= */
 function perfView() {
@@ -203,7 +207,7 @@ function moneyView() {
   const mv = S.moves.filter(m => m.type === 'dep' || m.type === 'adj').sort((a, b) => b.at - a.at).slice(0, 25);
   const line = (l, v, strong) => `<div class="list-row"><div class="grow">${strong ? `<b>${l}</b>` : l}</div><b class="num">${v}</b></div>`;
   return head('Caisse Wassi', 'Entrées et sorties d\'argent de l\'entreprise', `<div class="actions"><button class="btn" data-a="adj-add">Ajuster la caisse</button><button class="btn primary" data-a="dep-add">${ico('plus')} Dépense</button></div>`) +
-    `<div class="kpis">${kpi('Solde de la caisse', F(caisse()), 'frais encaissés − dépenses ± ajustements', true)}${kpi('Chez les livreurs', F(drvCash), 'ventes à récupérer')}${kpi('Dû aux boutiques', F(owed), 'argent des e-commerçants')}</div>
+    feeQueue() + `<div class="kpis" style="margin-top:14px">${kpi('Solde de la caisse', F(caisse()), 'frais encaissés − dépenses ± ajustements', true)}${kpi('Chez les livreurs', F(drvCash), 'ventes à récupérer')}${kpi('Dû aux boutiques', F(owed), 'argent des e-commerçants')}</div>
     <div class="section" style="margin-top:18px">${rangeChips()}<div class="kpis" style="margin-top:12px">${kpi('Entrées', F(ent), liv.length + ' livraisons · frais Wassi')}${kpi('Sorties', F(sor), deps.length + ' dépense(s)')}${kpi('Résultat de la période', F(ent - sor), adj ? 'hors ajustements : ' + F(adj) : 'entrées − sorties')}</div></div>
     <div class="section grid g-2" style="align-items:start">
       ${box('Entrées et sorties par jour', dl.length ? `<div class="table-wrap flat"><table><thead><tr><th>Jour</th><th class="r">Livr.</th><th class="r">Entrées</th><th class="r">Sorties</th><th class="r">Net</th></tr></thead><tbody>${dl.map(d => `<tr><td class="num">${dmy(dayB(d.k)[0]).slice(0, 5)}</td><td class="r num">${d.n}</td><td class="r num">${fmt(d.e)}</td><td class="r num">${fmt(d.s)}</td><td class="r num"><b class="${d.e - d.s < 0 ? 'low' : ''}">${fmt(d.e - d.s)}</b></td></tr>`).join('')}</tbody></table></div>` : empty('Aucun mouvement sur cette période'))}
@@ -247,7 +251,7 @@ function settingsView() {
         <button class="btn sm danger" data-a="user-del" data-id="${esc(u.id)}">Retirer</button>`}</div></div>`).join('')}</div></div>`;
 }
 VIEWS.ceo = () => {
-  const other = { perf: perfView, money: moneyView, shops: shopsView, drivers: driversView, reports: reportsView, map: mapView, settings: settingsView, orders: () => allOrders(S.orders, true) }[V.tab];
+  const other = { dispatch: dispatchView, accounts: accountsView, perf: perfView, money: moneyView, shops: shopsView, drivers: driversView, reports: reportsView, map: mapView, settings: settingsView, orders: () => allOrders(S.orders, true) }[V.tab];
   if (other) return other();
   const all = S.orders.filter(o => inRange(actT(o), V.range)), st = stats(all), late = S.orders.filter(isLate);
   const conf = all.filter(o => o.status !== 'nouveau' && !['annule', 'injoignable'].includes(o.status)).length;
@@ -289,20 +293,21 @@ VIEWS.marchand = () => {
     <a class="btn primary" target="_blank" rel="noopener" href="https://wa.me/${WASSI_WA}?text=${encodeURIComponent('Bonjour Wassi Delivery, je souhaite activer mon abonnement pour ' + U.shop + '.')}">${ico('chat')} Activer sur WhatsApp</a></div>`;
   const left = Math.ceil((sh.trialEnd - Date.now()) / DAY), sod = startOfDay();
   const trial = sh.plan === 'actif' ? '' : `<div class="insight" style="margin-bottom:14px">${ico('clock')}<div><b>Essai gratuit : ${left} jour(s) restant(s).</b> À la fin de l'essai, votre espace se bloque jusqu'à l'activation de l'abonnement.</div></div>`;
-  if (V.tab === 'orders') return allOrders(mine, false);
+  if (V.tab === 'orders') return marketBar() + allOrders(mine, false);
   const st0 = shopStock(U.shop), bal = balance(U.shop);
   if (V.tab === 'over') {
     const run = mine.filter(o => o.status === 'assigne'), wait = mine.filter(o => ['nouveau', 'confirme'].includes(o.status)), done = mine.filter(o => DONE.includes(o.status) && o.deliveredAt >= sod);
-    return hero(`${run.length} colis en route · ${wait.length} en préparation · ${done.length} livré(s) aujourd'hui.`) + trial +
+    return marketBar() + hero(`${run.length} colis en route · ${wait.length} en préparation · ${done.length} livré(s) aujourd'hui.`) + trial + marketsCard() +
       `<div class="kpis">${kpi('En route', run.length, 'chez les livreurs', true)}${kpi('En préparation', wait.length, 'appel et confirmation')}${kpi('Livrées aujourd\'hui', done.length, F(sum(done, o => o.price)))}${kpi('Solde à recevoir', F(bal))}</div>
       <div class="section"><h3>Suivi en direct sur la carte</h3>${mapView(true)}</div>
       ${wait.length ? `<div class="section"><h3>En préparation</h3>${grid(wait.slice(0, 9), o => card(o))}</div>` : ''}
       ${done.length ? `<div class="section"><h3>Livrées aujourd'hui</h3>${grid(done.slice(0, 9), o => card(o))}</div>` : ''}`;
   }
   if (V.tab === 'compte') {
-    const liv = mine.filter(o => o.status === 'livre'), mv = S.moves.filter(m => m.shop === U.shop).sort((a, b) => b.at - a.at).slice(0, 20);
+    const livAll = mine.filter(o => o.status === 'livre'), liv = livAll.filter(feeOk), pendN = livAll.length - liv.length, mv = S.moves.filter(m => m.shop === U.shop).sort((a, b) => b.at - a.at).slice(0, 20);
     const days = group(liv.filter(o => actT(o) >= sod - 13 * DAY), o => dayKey(actT(o))).sort((a, b) => b.k.localeCompare(a.k));
-    return head('Mon compte', 'Votre argent chez Wassi Delivery') + trial +
+    return marketBar() + head('Mon compte', 'Votre argent chez Wassi Delivery') + trial +
+      (pendN ? `<div class="insight" style="margin-bottom:14px">${ico('clock')}<div><b>${pendN} livraison(s) en attente de frais.</b> Wassi Delivery précise les frais de livraison ; elles seront ajoutées à votre solde juste après.</div></div>` : '') +
       `<div class="kpis">${kpi('Solde à recevoir', F(bal), 'ventes − frais Wassi − reversements', true)}${kpi('Ventes livrées', F(sum(liv, o => o.price)), liv.length + ' livraisons')}${kpi('Frais Wassi', F(sum(liv, wfee)))}${kpi('Déjà reversé', F(-sum(S.moves.filter(m => m.shop === U.shop && m.type === 'pay'), m => m.amt)))}</div>
       <div class="section grid g-2" style="align-items:start">
       ${box('Gain par jour (14 derniers jours)', days.length ? `<div class="table-wrap flat"><table><thead><tr><th>Jour</th><th class="r">Livr.</th><th class="r">Ventes</th><th class="r">Frais</th><th class="r">Gain</th></tr></thead><tbody>${days.map(d => `<tr><td class="num">${dmy(dayB(d.k)[0]).slice(0, 5)}</td><td class="r num">${d.n}</td><td class="r num">${fmt(d.cash)}</td><td class="r num">${fmt(d.fees)}</td><td class="r num"><b>${fmt(d.cash - d.fees)}</b></td></tr>`).join('')}</tbody></table></div>` : empty('Aucune livraison récente'))}
@@ -330,7 +335,7 @@ VIEWS.marchand = () => {
   return head('Statistiques', 'Ce qui se vend, où, et à qui') + trial + per +
     `<div class="kpis" style="margin-top:14px">${kpi('Livrées', st.liv, `sur ${st.n} commandes`, true)}${kpi('Taux de livraison', st.rate + ' %', `${st.closed} clôturées`)}${kpi('Chiffre livré', F(st.cash))}${kpi('Panier moyen', F(st.liv ? st.cash / st.liv : 0))}${kpi('Délai moyen', avg ? avg.toFixed(1).replace('.', ',') + ' h' : '—', 'commande → livraison')}</div>
     <div class="section"><h3>Détail par produit</h3>${prod.length ? `<div class="table-wrap"><table><thead><tr><th>Produit</th><th class="r">Commandes</th><th class="r">Livrées</th><th class="r">Taux</th><th class="r">Pièces vendues</th><th class="r">Chiffre</th><th class="r">Gain net</th></tr></thead><tbody>
-      ${prod.map(p => `<tr><td><b>${esc(p.k)}</b></td><td class="r num">${p.n}</td><td class="r num"><b>${p.liv}</b></td><td class="r num">${p.rate} %</td><td class="r num">${sum(p.livList, o => o.qty || 1)}</td><td class="r num">${fmt(p.cash)}</td><td class="r num"><b>${fmt(p.cash - p.fees)}</b></td></tr>`).join('')}</tbody></table></div>` : empty('Aucune commande sur cette période')}</div>
+      ${prod.map(p => `<tr><td><b>${esc(p.k)}</b></td><td class="r num">${p.n}</td><td class="r num"><b>${p.liv}</b></td><td class="r num">${p.rate} %</td><td class="r num">${sum(p.livList, o => o.qty || 1)}</td><td class="r num">${fmt(p.cash)}</td><td class="r num"><b>${fmt(net(p.livList.filter(feeOk)))}</b></td></tr>`).join('')}</tbody></table></div>` : empty('Aucune commande sur cette période')}</div>
     ${tips.length ? `<div class="section"><h3>Conseils pour vendre plus</h3><div class="grid">${tips.map(t => `<div class="insight">${ico('bulb')}<div>${t}</div></div>`).join('')}</div></div>` : ''}
     <div class="section grid g-2">
       ${box('Produits les plus livrés', bars(prod.slice(0, 8).map(p => ({ ...p, w: p.liv })), { val: r => r.liv + ' livrées' }))}
@@ -354,9 +359,10 @@ Object.assign(A, {
   markSeen();
   render();
   if (U && U.role === 'livreur' && Gps.on) Gps.start();
+  if (U) setTimeout(pushSetup, 3000);
   const sp0 = $('#splash'); if (sp0) setTimeout(() => { sp0.classList.add('out'); setTimeout(() => sp0.remove(), 700); }, sessionStorage.getItem('wassi.seen') ? 700 : 2900);
   sessionStorage.setItem('wassi.seen', '1');
   if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('sw.js').catch(() => {});
-  setInterval(() => { if (Remote.on) Remote.pull(); else if (U && !V.modal && !document.hidden && !(document.activeElement && /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName))) render(); }, Remote.on ? 20000 : 60000);
+  setInterval(() => { if (Remote.on) Remote.pull(); else if (U && !V.modal && !document.hidden && !(document.activeElement && /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName))) render(); }, Remote.on ? 10000 : 60000);
   if (Remote.on) Remote.pull().then(() => offerUpload());
 })();

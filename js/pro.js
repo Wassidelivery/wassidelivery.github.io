@@ -28,7 +28,7 @@ const Nav = {
     setTab(p.tab, p.sub); return true;
   }
 };
-function setTab(id, sub = null) { V.tab = id; V.sub = sub; V.q = ''; V.shop = ''; V.stf = ''; V.sel.clear(); V.mapSel = null; render(); window.scrollTo(0, 0); }
+function setTab(id, sub = null) { V.tab = id; V.sub = sub; V.disp = null; V.q = ''; V.shop = ''; V.stf = ''; V.sel.clear(); V.mapSel = null; render(); window.scrollTo(0, 0); }
 window.addEventListener('popstate', () => { if (Nav.skip) { Nav.skip--; return; } Nav.back(); });
 
 /* ================= Annuler la dernière action ================= */
@@ -113,7 +113,7 @@ function release(o) {                           // la livraison est annulée ou 
 const dayB = d => { const a = new Date(d + 'T00:00:00').getTime(); return [a, a + DAY]; };
 const balanceAt = (shop, t = Infinity) => {
   const s = shopOf(shop) || {};
-  return (s.open || 0) + net(S.orders.filter(o => o.shop === shop && o.status === 'livre' && actT(o) < t)) + sum(S.moves.filter(m => m.shop === shop && m.at < t), m => m.amt);
+  return (s.open || 0) + net(S.orders.filter(o => o.shop === shop && o.status === 'livre' && feeOk(o) && actT(o) < t)) + sum(S.moves.filter(m => m.shop === shop && m.at < t), m => m.amt);
 };
 const balance = shop => balanceAt(shop);
 const caisse = (t = Infinity) => sum(S.orders.filter(o => o.status === 'livre' && actT(o) < t), wfee)
@@ -134,7 +134,7 @@ function exoResult() {
 /* ================= Rapport journalier d'un e-commerçant (même format que d'habitude) ================= */
 const sp = n => fmt(n).replace(/\s/g, ' ');
 function reportText(shop, day) {
-  const [a, b] = dayB(day), l = S.orders.filter(o => o.shop === shop && o.status === 'livre' && actT(o) >= a && actT(o) < b).sort((x, y) => actT(x) - actT(y));
+  const [a, b] = dayB(day), l = S.orders.filter(o => o.shop === shop && o.status === 'livre' && feeOk(o) && actT(o) >= a && actT(o) < b).sort((x, y) => actT(x) - actT(y));
   const fails = S.orders.filter(o => o.shop === shop && o.status === 'annule' && (o.updatedAt || o.createdAt) >= a && (o.updatedAt || o.createdAt) < b).length;
   const ventes = sum(l, o => o.price), frais = sum(l, wfee), gain = ventes - frais, fin = balanceAt(shop, b), q = new Map();
   l.forEach(o => q.set(o.product, (q.get(o.product) || 0) + (o.qty || 1)));
@@ -309,7 +309,7 @@ Object.assign(A, {
   'tab-m': d => { V.modal = null; renderModal(); Nav.go(d.id); },
   sub: d => Nav.sub(d.id),
   day: d => { V.day = d.id; render(); },
-  noclose: d => { const o = order(d.id); o.noClose = !o.noClose; commit(o, o.noClose ? 'Closing fait par la boutique (pas de frais de closing)' : 'Closing fait par Wassi'); },
+  noclose: d => { const o = order(d.id); if (!MONEY()) return; o.noClose = !o.noClose; commit(o, o.noClose ? 'Closing fait par la boutique (pas de frais de closing)' : 'Closing fait par Wassi'); },
   undeliver: d => { Biz.undeliver(order(d.id)); V.modal = null; renderModal(); toast('Corrigé', 'La commande est revenue dans « À livrer ».'); },
   confirm: d => { const o = order(d.id); Biz.confirm(o); if (!byRole('livreur').length) return;
     V.modal = { t: 'html', title: 'Envoyer à quel livreur ?', html: () => `<p style="color:var(--ink-2);margin-bottom:10px">${esc(o.client)} · ${esc(o.product)} · ${esc(o.zone)}</p><div class="grid">${byRole('livreur').map(u => { const h = inHand(u.id, o.shop, o.product), n = S.orders.filter(x => x.driver === u.id && x.status === 'assigne').length;
@@ -372,4 +372,126 @@ Object.assign(A, {
   preview: d => { const s = d.id && S.shops.find(x => x.id === d.id); if (U.role !== 'ceo' || Remote.on) return;
     enter(s ? { id: 'preview', name: s.name, role: 'marchand', shop: s.name, preview: true } : d.u ? user(d.u) : { id: 'preview', name: 'Aperçu', role: 'assistante', preview: true }); },
   report: d => { V.modal = { t: 'report', title: 'Rapport ' + d.id, text: reportText(d.id, V.day) }; renderModal(); }
+});
+
+/* ================= Frais à préciser (opérations et CEO) ================= */
+const feePending = () => S.orders.filter(o => o.status === 'livre' && !feeOk(o)).sort((a, b) => actT(a) - actT(b));
+function feeQueue() {
+  const l = feePending(); if (!l.length || !MONEY()) return '';
+  return `<div class="section"><div class="head"><h3 style="font-size:12px;text-transform:uppercase;letter-spacing:.1em;color:var(--ink-3)">Frais de livraison à préciser · ${l.length}</h3>
+      ${l.length > 1 ? `<button class="btn sm primary" data-a="fee-all">Tout valider aux montants proposés</button>` : ''}</div>
+    <p class="note">Tant que les frais ne sont pas validés, la livraison n'est pas comptée dans le solde de la boutique et l'e-commerçant ne voit pas les frais.</p>
+    <div class="card">${l.slice(0, 40).map(o => `<div class="list-row wrap"><div class="grow" data-a="open" data-id="${esc(o.id)}" style="cursor:pointer"><b>${esc(o.shop)} · ${esc(o.product)}${o.qty > 1 ? ' × ' + o.qty : ''}</b><small>${esc(o.zone)} · ${F(o.price)} · livrée le ${dmy(actT(o)).slice(0, 5)} par ${esc(uname(o.driver))}</small></div>
+      <input class="input num" style="width:104px" inputmode="numeric" data-ch="fee" data-id="${esc(o.id)}" value="${esc(o.fee || 0)}" aria-label="Frais de livraison en francs">
+      <button class="btn sm ok" data-a="fee-ok" data-id="${esc(o.id)}">Valider</button></div>`).join('')}</div></div>`;
+}
+
+/* ================= Répartition des boutiques entre les closeuses ================= */
+function dispatchView() {
+  const clos = byRole('closeuse'), cur = Object.fromEntries(S.dispatch.map(d => [d.shop, d.closer]));
+  if (!V.disp) V.disp = { ...cur };
+  const d = V.disp, shops = S.shops.slice().sort((a, b) => a.name.localeCompare(b.name)), last = S.dispatch[0];
+  const cnt = name => S.orders.filter(o => o.shop === name && o.status === 'nouveau').length;
+  const dirty = shops.some(s => (d[s.name] || '') !== (cur[s.name] || ''));
+  return head('Répartition des boutiques', 'Chaque matin, donnez à chaque closeuse les boutiques qu\'elle traite, puis envoyez', `<button class="btn primary" data-a="disp-send">${ico('check')} Envoyer la répartition</button>`) +
+    `<div class="kpis">${clos.map(c => { const mine = shops.filter(s => d[s.name] === c.id); return kpi(esc(c.name), mine.length + ' boutique' + (mine.length > 1 ? 's' : ''), sum(mine, s => cnt(s.name)) + ' commande(s) à traiter'); }).join('')}
+      ${kpi('Non réparties', shops.filter(s => !d[s.name]).length, 'vues par toutes les closeuses', true)}</div>
+    <p class="note" style="margin:12px 0">${last ? `Dernière répartition envoyée le ${dmy(dayB(last.day)[0])}${last.by ? ' par ' + esc(last.by) : ''}. Elle reste valable tant qu'une nouvelle n'est pas envoyée.` : 'Aucune répartition envoyée : pour l\'instant, toutes les closeuses voient toutes les boutiques.'}${dirty ? ' <b style="color:var(--bad)">Modifications pas encore envoyées.</b>' : ''}</p>
+    <div class="actions" style="margin-bottom:12px"><button class="btn" data-a="disp-auto">Répartir automatiquement</button><button class="btn" data-a="disp-clear">Tout effacer</button></div>
+    ${clos.length ? '' : `<div class="insight alert" style="margin-bottom:12px">${ico('alert')}<div>Aucune closeuse n'a de compte dans ce pays. Ajoutez-les dans Réglages > Équipe.</div></div>`}
+    <div class="table-wrap"><table><thead><tr><th>Boutique</th><th class="r">À traiter</th><th>Closeuse du jour</th></tr></thead><tbody>${shops.map(s => `<tr><td><b>${esc(s.name)}</b></td><td class="r num">${cnt(s.name)}</td>
+      <td><select class="input" data-disp="${esc(s.name)}" style="min-width:170px" aria-label="Closeuse pour ${esc(s.name)}"><option value="">— Non répartie —</option>${clos.map(c => `<option value="${esc(c.id)}" ${d[s.name] === c.id ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select></td></tr>`).join('')}</tbody></table></div>`;
+}
+
+/* ================= Comptes : qui utilise l'app, qui est connecté ================= */
+function accountsView() {
+  const now = Date.now(), on = u => (S.seen[u.id] || 0) > now - 3 * MIN;
+  const when = u => on(u) ? '<span class="badge st-ok">En ligne</span>' : S.seen[u.id] ? 'vu ' + ago(S.seen[u.id]) : u.lastLogin ? 'connexion ' + ago(u.lastLogin) : '<span class="badge st-wait">Jamais connecté</span>';
+  const acc = u => u.pass ? `code <b class="num">${esc(u.pass)}</b>` : u.ph ? 'mot de passe personnel' : '<span style="color:var(--bad)">aucun accès</span>';
+  const order2 = (a, b) => on(b) - on(a) || (S.seen[b.id] || b.lastLogin || 0) - (S.seen[a.id] || a.lastLogin || 0);
+  const ms = S.users.filter(u => u.role === 'marchand' && !u.gone).sort(order2), st = S.users.filter(u => u.role !== 'marchand' && !u.gone && u.status !== 'pending').sort(order2);
+  const row = (u, shop) => `<tr><td><b>${esc(u.name)}</b>${u.status === 'pending' ? ' <span class="badge st-conf">À valider</span>' : ''}${shop ? `<br><small style="color:var(--ink-3)">${esc(u.contact || '')}</small>` : `<br><small style="color:var(--ink-3)">${ROLES[u.role]}</small>`}</td>
+    <td>${u.email ? esc(u.email) : '<span style="color:var(--bad)">à renseigner</span>'}${u.phone ? `<br><small style="color:var(--ink-3)">${esc(u.phone)}</small>` : ''}</td><td>${acc(u)}</td><td>${when(u)}</td>
+    ${shop ? `<td>${shopOf(u.shop) ? planBadge(shopOf(u.shop)) : '—'}</td>` : ''}
+    <td class="r">${shop ? (shopOf(u.shop) ? `<button class="btn sm line" data-a="shop-access" data-id="${esc(shopOf(u.shop).id)}">Nouveau code</button>` : '') : (u.id === U.id ? '' : `<button class="btn sm line" data-a="user-code" data-id="${esc(u.id)}">Nouveau code</button>`)}</td></tr>`;
+  return head('Comptes', 'Qui utilise l\'application, avec quel e-mail, et qui est connecté en ce moment') +
+    `<div class="kpis">${kpi('E-commerçants inscrits', ms.length, S.shops.length + ' boutiques au total')}${kpi('En ligne maintenant', S.users.filter(on).length, 'actifs dans les 3 dernières minutes', true)}${kpi('Jamais connectés', S.users.filter(u => !u.gone && !u.lastLogin && !S.seen[u.id]).length, 'comptes créés mais pas utilisés')}</div>
+    <p class="note" style="margin:12px 0">Un <b>code</b> donné par Wassi reste visible ici. Un <b>mot de passe personnel</b>, choisi par la personne, est secret : personne ne peut le lire, même vous. Si elle l'oublie, « Nouveau code » lui en crée un provisoire.</p>
+    <div class="section" style="margin-top:8px"><h3>E-commerçants · ${ms.length}</h3>${ms.length ? `<div class="table-wrap"><table><thead><tr><th>Boutique</th><th>E-mail</th><th>Accès</th><th>Activité</th><th>Abonnement</th><th></th></tr></thead><tbody>${ms.map(u => row(u, true)).join('')}</tbody></table></div>` : empty('Aucun e-commerçant n\'a encore de compte', 'Créez leur accès depuis la fiche de leur boutique, ou laissez-les s\'inscrire.')}</div>
+    <div class="section"><h3>Équipe · ${st.length}</h3><div class="table-wrap"><table><thead><tr><th>Nom</th><th>E-mail</th><th>Accès</th><th>Activité</th><th></th></tr></thead><tbody>${st.map(u => row(u, false)).join('')}</tbody></table></div></div>`;
+}
+
+/* ================= E-commerçant présent dans plusieurs pays ================= */
+function loadMarkets() {
+  if (V.mBusy || !Remote.on) return; V.mBusy = true;
+  Remote.call({ a: 'markets' }).then(r => { V.mBusy = false; V.markets = r.ok ? r.markets : []; render(); }).catch(() => { V.mBusy = false; V.markets = []; });
+}
+// Barre en haut de l'espace e-commerçant : un clic pour passer d'un pays à l'autre.
+function marketBar() {
+  if (!Remote.on) return '';
+  if (!V.markets) { loadMarkets(); return ''; }
+  const others = V.markets.filter(x => !x.here && COUNTRIES[x.c]);
+  return `<div class="chips" style="margin-bottom:12px"><span class="chip on">${flag(CC)}${esc(PAYS.name)}</span>${others.map(x => `<button class="chip" data-a="market-go" data-id="${x.c}">${flag(x.c)}${esc(COUNTRIES[x.c].name)} <small>${x.run} en cours</small></button>`).join('')}
+    ${Object.keys(COUNTRIES).length > V.markets.length ? `<button class="chip" data-a="market-add">${ico('plus')} Ajouter un pays</button>` : ''}</div>`;
+}
+function marketsCard() {
+  if (!Remote.on || !V.markets || V.markets.length < 2) return '';
+  return `<div class="section"><h3>Mes marchés</h3><div class="card">${V.markets.filter(x => COUNTRIES[x.c]).map(x => `<div class="list-row">${flag(x.c)}<div class="grow"><b>${esc(COUNTRIES[x.c].name)}</b><small>${esc(x.shop)} · ${x.run} commande(s) en cours · ${x.liv} livrée(s) aujourd'hui</small></div>
+    ${x.here ? '<span class="badge st-ok">Vous êtes ici</span>' : `<button class="btn sm primary" data-a="market-go" data-id="${x.c}">Ouvrir</button>`}</div>`).join('')}</div></div>`;
+}
+
+/* ================= Notifications sur le téléphone, même app fermée ================= */
+const b64Bytes = t => Uint8Array.from(atob(String(t).replace(/-/g, '+').replace(/_/g, '/')), ch => ch.charCodeAt(0));
+async function pushSetup() {
+  if (!Remote.on || !U || U.preview || !('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window) || Notification.permission !== 'granted') return;
+  try {
+    const reg = await navigator.serviceWorker.ready; let sub = await reg.pushManager.getSubscription();
+    if (!sub) { const r = await Remote.call({ a: 'pushkey' }); if (!r.ok || !r.key) return; sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64Bytes(r.key) }); }
+    V.pushE = sub.endpoint; const tag = U.id + '|' + sub.endpoint;
+    if (localStorage.getItem(LS('wassi.push')) !== tag) { const r = await Remote.call({ a: 'subscribe', e: sub.endpoint }); if (r.ok) localStorage.setItem(LS('wassi.push'), tag); }
+  } catch (e) {}
+}
+function pushOff() {                             // à la déconnexion : ce téléphone ne reçoit plus les notifications de ce compte
+  if (Remote.on && V.pushE) Remote.call({ a: 'unsubscribe', e: V.pushE }).catch(() => {});
+  localStorage.removeItem(LS('wassi.push'));
+}
+function pushHint() {
+  if (!('Notification' in window) || Notification.permission === 'granted') return '';
+  return `<div class="insight" style="margin-bottom:10px">${ico('bell')}<div style="flex:1">${Notification.permission === 'denied' ? 'Les notifications sont bloquées pour cette app. Autorisez-les dans les réglages du téléphone pour être prévenu même quand l\'app est fermée.' : 'Activez les notifications pour être prévenu avec une sonnerie, même quand l\'app est fermée.'}</div>
+    ${Notification.permission === 'denied' ? '' : '<button class="btn sm primary" data-a="notif-on">Activer</button>'}</div>`;
+}
+
+Object.assign(A, {
+  eye: (d, el) => { const i = el.parentElement.querySelector('input'); if (!i) return; i.type = i.type === 'password' ? 'text' : 'password'; el.classList.toggle('on', i.type === 'text'); i.focus(); },
+  'fee-ok': d => { const o = order(d.id); if (!o || !MONEY()) return; o.feeSet = true; commit(o, 'Frais validés : ' + F(wfee(o))); },
+  'fee-all': () => { const l = feePending(); if (!MONEY() || !l.length || !confirm(`Valider les frais proposés pour ${l.length} livraison(s) ?`)) return;
+    l.forEach(o => { o.feeSet = true; o.history.push({ at: Date.now(), by: U.name, text: 'Frais validés : ' + F(wfee(o)) }); o.updatedAt = Date.now(); Remote.push({ t: 'order', o }); }); persist(); render(); toast('Frais validés', l.length + ' livraison(s) ajoutée(s) aux soldes des boutiques.'); },
+  'disp-auto': () => { const clos = byRole('closeuse'); if (!clos.length) return toast('Aucune closeuse', 'Ajoutez d\'abord les closeuses dans Réglages.');
+    const cnt = n => S.orders.filter(o => o.shop === n && o.status === 'nouveau').length; V.disp = {};
+    S.shops.slice().sort((a, b) => cnt(b.name) - cnt(a.name) || a.name.localeCompare(b.name)).forEach((s, i) => { V.disp[s.name] = clos[i % clos.length].id; }); render(); },
+  'disp-clear': () => { V.disp = {}; render(); },
+  'disp-send': () => { const d = V.disp || {};
+    S.dispatch = S.shops.filter(s => d[s.name] && user(d[s.name])).map(s => ({ shop: s.name, closer: d[s.name], day: today(), by: U.name }));
+    byRole('closeuse').forEach(c => { const l = S.dispatch.filter(x => x.closer === c.id).map(x => x.shop);
+      notify({ toUser: c.id, title: 'Votre répartition du jour', text: l.length ? `Vos boutiques aujourd'hui : ${l.join(', ')}. Traitez uniquement leurs commandes.` : 'Aucune boutique ne vous est attribuée pour le moment.' }); });
+    V.disp = null; save('dispatch'); toast('Répartition envoyée', 'Chaque closeuse a reçu la liste de ses boutiques.'); },
+  'notif-on': () => { Notification.requestPermission().then(p => { if (p === 'granted') { pushSetup(); toast('Notifications activées', 'Vous serez prévenu même quand l\'app est fermée.'); } renderModal(); }).catch(() => {}); },
+  'market-go': async d => {
+    if (!COUNTRIES[d.id]) return; toast('Changement de pays', 'Ouverture de ' + COUNTRIES[d.id].name + '…');
+    try {
+      const r = await Remote.call({ a: 'switch', to: d.id }); if (!r.ok) return toast('Impossible', 'Vous n\'avez pas encore de compte dans ce pays.');
+      const sfx = d.id === 'ne' ? '' : '.' + d.id; let st = null; try { st = JSON.parse(localStorage.getItem('wassi.remote' + sfx)); } catch (e) {}
+      if (!st || st.v !== 1) st = { v: 1, users: [], shops: [], orders: [], notifs: [] };
+      st.users = (st.users || []).filter(u => u.id !== r.user.id).concat([r.user]); st.orders = [];
+      localStorage.setItem('wassi.remote' + sfx, JSON.stringify(st)); localStorage.setItem('wassi.token' + sfx, r.token); localStorage.setItem('wassi.user' + sfx, r.user.id); localStorage.removeItem('wassi.since' + sfx);
+      localStorage.setItem('wassi.country', d.id); location.reload();
+    } catch (e) { toast('Connexion impossible', 'Vérifiez votre connexion internet.'); }
+  },
+  'market-add': () => { const have = (V.markets || []).map(x => x.c), opts = Object.entries(COUNTRIES).filter(([k]) => !have.includes(k)).map(([k, c]) => [k, c.name]);
+    if (!opts.length) return toast('Déjà partout', 'Vous êtes présent dans tous les pays.');
+    form('Ouvrir un nouveau pays', [{ k: 'to', l: 'Pays', opts }, { k: 'sheet', l: 'Lien du Google Sheet des commandes de ce pays', ph: 'https://docs.google.com/spreadsheets/d/…' }],
+      v => { Remote.call({ a: 'market-add', to: v.to, sheet: v.sheet.trim() }).then(r => { if (r.ok) { V.markets = null; toast('Marché ouvert', COUNTRIES[v.to].name + ' est ajouté. Même e-mail, même mot de passe.'); render(); }
+        else toast('Impossible', r.error === 'exists' ? 'Vous avez déjà un compte dans ce pays.' : r.error === 'shop' ? 'Une boutique du même nom existe déjà dans ce pays. Contactez Wassi Delivery.' : 'Ce pays n\'est pas encore disponible.'); })
+        .catch(() => toast('Connexion impossible', 'Vérifiez votre connexion internet.')); },
+      { note: 'Partagez ce Google Sheet avec le compte Google de Wassi Delivery (droit Éditeur). Les nouvelles commandes arriveront automatiquement dans ce pays. Essai gratuit de 30 jours.', ok: 'Ouvrir ce pays' }); }
 });

@@ -379,3 +379,12 @@ pre.report { white-space: pre-wrap; font: 13px/1.5 ui-monospace, Consolas, monos
 .country-pill { display: flex; align-items: center; gap: 2px; width: 100%; padding: 8px 12px; margin-bottom: 14px; border-radius: 12px; background: var(--surface-2); font-size: 13.500px; }
 .country-pill b { flex: 1; text-align: left; }
 .country-pill span { color: var(--gold-ink); font-weight: 700; }
+
+/* ---------- Mot de passe visible, connexion en cours ---------- */
+.field { position: relative; }
+.eye { position: absolute; right: 4px; bottom: 2px; width: 40px; height: 40px; border-radius: 10px; display: grid; place-items: center; color: var(--ink-3); }
+.eye.on { color: var(--gold-ink); }
+.field:has(.eye) .input { padding-right: 46px; }
+.spin { display: inline-block; width: 16px; height: 16px; border-radius: 50%; border: 2px solid currentColor; border-right-color: transparent; animation: spin .7s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg) } }
+.btn[disabled] .spin { opacity: 1; }
