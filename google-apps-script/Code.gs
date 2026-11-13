@@ -383,46 +383,85 @@ function writeBack(o) {
 }
 
 /**
- * Récupère les nouvelles lignes des Sheets des boutiques.
- * · Chaque minute, pour tous les pays (déclencheur).
- * · À chaque lecture de l'app par un membre de l'équipe, pour son pays (au plus toutes les 15 secondes).
- * Pour rester dans les limites gratuites de Google, seuls les Sheets modifiés depuis le dernier passage
- * sont ouverts ; le déclencheur les revérifie tous toutes les 10 minutes par sécurité.
+ * Récupère les nouvelles lignes des Sheets des boutiques, en lisant chaque Sheet directement
+ * (Google Drive signale les modifications avec plusieurs minutes de retard : on ne s'y fie plus).
+ * · Dès qu'un membre de l'équipe a l'app ouverte : à chaque lecture de l'app, pour son pays (toutes les 12 secondes au plus).
+ * · Sinon, chaque minute pour tous les pays (déclencheur) : c'est ce qui fait sonner les téléphones quand l'app est fermée.
  */
 function quickImport() {
   const last = Number(PropertiesService.getScriptProperties().getProperty('imp_fast_' + CC)) || 0;
-  if (Date.now() - last >= 15000) importAll(CC);
+  if (Date.now() - last >= 12000) importAll(CC);
 }
+function linkedShops() { return rows('shops').filter(function (s) { return s.sheetId; }); }
 function importAll(only) {
   only = typeof only === 'string' ? only : null;
   const lock = LockService.getScriptLock();
   if (!lock.tryLock(only ? 300 : 5000)) return;
   try {
-    const props = PropertiesService.getScriptProperties(), now = Date.now(), start = now, key = only ? 'imp_fast_' + only : 'imp_at';
-    const last = Number(props.getProperty(key)) || 0, full = Number(props.getProperty('imp_full')) || 0;
-    let changed = null;                                              // null = tout vérifier
-    if (last && (only || now - full < 10 * 60000)) {
-      try {
-        changed = {};
-        const q = 'modifiedDate > "' + new Date(last - 120000).toISOString().slice(0, 19) + '" and mimeType = "application/vnd.google-apps.spreadsheet"';
-        const it = DriveApp.searchFiles(q); while (it.hasNext()) changed[it.next().getId()] = 1;
-      } catch (err) { changed = null; }
+    const props = PropertiesService.getScriptProperties(), start = Date.now();
+    if (only) {
+      props.setProperty('imp_fast_' + only, String(start));
+      ORDER_ROWS = null; directImport('imp_cur_' + only, start, 5000); ORDER_ROWS = null;
+      return;
     }
-    if (!changed && !only) props.setProperty('imp_full', String(now));
-    props.setProperty(key, String(now));
-    const run = function () {
-      const shops = rows('shops').filter(function (shop) { return shop.sheetId && (!changed || changed[String(shop.sheetId)]); });
-      if (shops.length) {
-        let next = tab('orders').getLastRow() + 1000;
-        shops.forEach(function (shop) {
-          if (Date.now() - start > (only ? 12000 : 40000)) return;     // on reprendra au prochain passage
-          try { next = importShop(shop, next); } catch (err) { console.error('import ' + shop.name + ' : ' + err); }
-        });
-      }
-      if (!changed && !only) { const nn = tab('notifs').getLastRow(); if (nn > 700) tab('notifs').deleteRows(2, nn - 400); }   // on ne garde que les notifications récentes
-    };
-    if (only) { ORDER_ROWS = null; run(); ORDER_ROWS = null; } else eachCountry(run);
+    eachCountry(function (c) {
+      // L'équipe de ce pays a l'app ouverte : ses lectures s'occupent déjà des Sheets.
+      if (start - (Number(props.getProperty('imp_fast_' + c)) || 0) < 90000) return;
+      const shops = linkedShops(); if (!shops.length) return;
+      if (!restImport(shops, 'imp_tcur_' + c)) directImport('imp_cur_' + c, start, 4000);
+    });
+    if (start - (Number(props.getProperty('imp_full')) || 0) > 600000) {         // ménage : on ne garde que les notifications récentes
+      props.setProperty('imp_full', String(start));
+      eachCountry(function () { const nn = tab('notifs').getLastRow(); if (nn > 700) tab('notifs').deleteRows(2, nn - 400); });
+    }
   } finally { lock.releaseLock(); }
+}
+// Lecture directe, un Sheet après l'autre, en reprenant là où le passage précédent s'est arrêté.
+function directImport(key, start, budget) {
+  const props = PropertiesService.getScriptProperties(), shops = linkedShops(), n = shops.length; if (!n) return;
+  const cur = (Number(props.getProperty(key)) || 0) % n; let next = tab('orders').getLastRow() + 1000, done = 0;
+  for (; done < n && (done === 0 || Date.now() - start < budget); done++) {
+    const shop = shops[(cur + done) % n];
+    try { next = importShop(shop, next, null); } catch (err) { console.error('import ' + shop.name + ' : ' + err); }
+  }
+  props.setProperty(key, String((cur + done) % n));
+}
+// Lecture de plusieurs Sheets en même temps (API Google Sheets). Renvoie false si elle n'est pas disponible.
+function restImport(shops, key) {
+  const props = PropertiesService.getScriptProperties();
+  if (Date.now() - (Number(props.getProperty('rest_off')) || 0) < 6 * 3600000) return false;
+  const n = shops.length, cur = (Number(props.getProperty(key)) || 0) % n, pick = [];
+  for (let i = 0; i < Math.min(n, 15); i++) pick.push(shops[(cur + i) % n]);
+  props.setProperty(key, String((cur + pick.length) % n));
+  let res;
+  try {
+    const tok = ScriptApp.getOAuthToken();
+    res = UrlFetchApp.fetchAll(pick.map(function (shop) {
+      return { url: 'https://sheets.googleapis.com/v4/spreadsheets/' + encodeURIComponent(String(shop.sheetId)) + '/values:batchGet?ranges=1:1&ranges=A' + Math.max(2, Number(shop.lastRow || 1) + 1) + ':ZZ&valueRenderOption=FORMATTED_VALUE',
+        headers: { Authorization: 'Bearer ' + tok }, muteHttpExceptions: true };
+    }));
+  } catch (err) { props.setProperty('rest_off', String(Date.now())); return false; }
+  let next = tab('orders').getLastRow() + 1000, okAny = false, off = false;
+  res.forEach(function (r, i) {
+    const code = r.getResponseCode(), shop = pick[i];
+    if (code !== 200) { if (code === 403 && /disabled|not been used|insufficient/i.test(r.getContentText())) off = true; else console.error('sheet ' + shop.name + ' : HTTP ' + code); return; }
+    okAny = true;
+    const vr = parse(r.getContentText(), {}).valueRanges || [];
+    try { next = importShop(shop, next, { head: (vr[0] && vr[0].values && vr[0].values[0]) || [], data: (vr[1] && vr[1].values) || [] }); }
+    catch (err) { console.error('import ' + shop.name + ' : ' + err); }
+  });
+  if (off && !okAny) { props.setProperty('rest_off', String(Date.now())); return false; }
+  return true;
+}
+// À lancer à la main depuis l'éditeur pour vérifier la lecture des Sheets (résultat dans le journal d'exécution).
+function diag() {
+  eachCountry(function (c) {
+    const shops = linkedShops(); if (!shops.length) { console.log(c + ' : aucun Sheet lié'); return; }
+    const t0 = Date.now(), r = UrlFetchApp.fetchAll(shops.map(function (s) { return { url: 'https://sheets.googleapis.com/v4/spreadsheets/' + encodeURIComponent(String(s.sheetId)) + '/values:batchGet?ranges=1:1', headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() }, muteHttpExceptions: true }; }));
+    const t1 = Date.now(); shops.forEach(function (s) { try { merchantSheet(s).getLastRow(); } catch (err) { console.log(c + ' ' + s.name + ' : ouverture impossible — ' + err); } });
+    console.log(c + ' : ' + shops.length + ' Sheet(s) · lecture groupée ' + (t1 - t0) + ' ms, codes ' + r.map(function (x) { return x.getResponseCode(); }).join(',') + ' · lecture directe ' + (Date.now() - t1) + ' ms'
+      + (r[0].getResponseCode() === 200 ? '' : ' · ' + r[0].getContentText().slice(0, 200)));
+  });
 }
 function toTime(v) {                              // date d'une cellule : vraie date, « 12/11/2026 » ou « 2026-11-12 »
   if (v instanceof Date) return v.getTime();
@@ -431,13 +470,21 @@ function toTime(v) {                              // date d'une cellule : vraie 
   m = s.match(/(\d{4})-(\d{1,2})-(\d{1,2})/);
   return m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])).getTime() : NaN;
 }
-function importShop(shop, next) {
+function importShop(shop, next, pre) {
   // Premier passage après le branchement du Sheet : on ne reprend pas les anciennes commandes déjà traitées,
   // seulement celles datées du jour même (si le Sheet a une colonne de date).
   const init = !Number(shop.lastRow), mark = function (n) { tab('shops').getRange(shop._row, HEAD.shops.indexOf('lastRow') + 1).setValue(Math.max(1, n)); };
-  const sh = merchantSheet(shop), last = sh.getLastRow(), from = Math.max(2, Number(shop.lastRow || 1) + 1);
-  if (last < from) { if (init) mark(last); return next; }
-  const w = sh.getLastColumn(), h = sh.getRange(1, 1, 1, w).getValues()[0];
+  const from = Math.max(2, Number(shop.lastRow || 1) + 1);
+  let h, data, last;
+  if (pre) {                                      // lignes déjà lues par la lecture groupée
+    h = pre.head; data = pre.data; last = from - 1 + data.length;
+    if (!data.length) { if (init) mark(1); return next; }
+  } else {
+    const sh = merchantSheet(shop); last = sh.getLastRow();
+    if (last < from) { if (init) mark(last); return next; }
+    const w = sh.getLastColumn(); h = sh.getRange(1, 1, 1, w).getValues()[0];
+    data = sh.getRange(from, 1, last - from + 1, w).getValues();
+  }
   const c = {
     product: col(h, /produit|product|article/), client: col(h, /nom|client|name/, /produit|product|article/),
     phone: col(h, /t[ée]l|num[ée]ro|phone|contact|whatsapp/), price: col(h, /prix|montant|total|price/),
@@ -446,9 +493,9 @@ function importShop(shop, next) {
   };
   const today0 = new Date(); today0.setHours(0, 0, 0, 0);
   const disp = (blobs().dispatch || []).filter(function (d) { return d.shop === shop.name; })[0], pushes = [];
-  const data = sh.getRange(from, 1, last - from + 1, w).getValues(), now = Date.now(), orders = [], notifs = [];
+  const now = Date.now(), orders = [], notifs = [];
   data.forEach(function (r, i) {
-    const get = function (k) { return c[k] >= 0 ? String(r[c[k]]).trim() : ''; };
+    const get = function (k) { return c[k] >= 0 && r[c[k]] != null ? String(r[c[k]]).trim() : ''; };
     if (!get('client') && !get('phone')) return;                     // ligne vide
     if (init && !(c.date >= 0 && toTime(r[c.date]) >= today0.getTime())) return;   // ancienne commande : ignorée
     const sx = get('sexe').charAt(0).toUpperCase(), id = 'o' + Utilities.getUuid().slice(0, 12);

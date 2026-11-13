@@ -41,7 +41,7 @@ const Undo = {
       const was = new Map(cur.orders.map(o => [o.id, JSON.stringify(o)])), ids = new Set(S.orders.map(o => o.id));
       S.orders.forEach(o => { if (was.get(o.id) !== JSON.stringify(o)) Remote.push({ t: 'order', o }); });
       cur.orders.forEach(o => { if (!ids.has(o.id)) Remote.push({ t: 'order', o: { ...o, status: 'annule', reason: 'Saisie annulée' } }); });
-      blob('stock', 'takes', 'moves', 'goals', 'charges');
+      blob('stock', 'takes', 'moves', 'goals', 'charges', 'dispatch');
       if (U.role === 'ceo') { Remote.push({ t: 'users', users: S.users }); Remote.push({ t: 'shops', shops: S.shops }); }
     }
     V.modal = null; persist(); renderModal(); render();
@@ -413,7 +413,7 @@ function accountsView() {
   const row = (u, shop) => `<tr><td><b>${esc(u.name)}</b>${u.status === 'pending' ? ' <span class="badge st-conf">À valider</span>' : ''}${shop ? `<br><small style="color:var(--ink-3)">${esc(u.contact || '')}</small>` : `<br><small style="color:var(--ink-3)">${ROLES[u.role]}</small>`}</td>
     <td>${u.email ? esc(u.email) : '<span style="color:var(--bad)">à renseigner</span>'}${u.phone ? `<br><small style="color:var(--ink-3)">${esc(u.phone)}</small>` : ''}</td><td>${acc(u)}</td><td>${when(u)}</td>
     ${shop ? `<td>${shopOf(u.shop) ? planBadge(shopOf(u.shop)) : '—'}</td>` : ''}
-    <td class="r">${shop ? (shopOf(u.shop) ? `<button class="btn sm line" data-a="shop-access" data-id="${esc(shopOf(u.shop).id)}">Nouveau code</button>` : '') : (u.id === U.id ? '' : `<button class="btn sm line" data-a="user-code" data-id="${esc(u.id)}">Nouveau code</button>`)}</td></tr>`;
+    <td class="r">${shop ? (shopOf(u.shop) ? `<button class="btn sm line" data-a="shop-access" data-id="${esc(shopOf(u.shop).id)}">Nouveau code</button><button class="btn sm danger" data-a="shop-del" data-id="${esc(shopOf(u.shop).id)}">Supprimer</button>` : '') : (u.id === U.id ? '' : `<button class="btn sm line" data-a="user-code" data-id="${esc(u.id)}">Nouveau code</button>`)}</td></tr>`;
   return head('Comptes', 'Qui utilise l\'application, avec quel e-mail, et qui est connecté en ce moment') +
     `<div class="kpis">${kpi('E-commerçants inscrits', ms.length, S.shops.length + ' boutiques au total')}${kpi('En ligne maintenant', S.users.filter(on).length, 'actifs dans les 3 dernières minutes', true)}${kpi('Jamais connectés', S.users.filter(u => !u.gone && !u.lastLogin && !S.seen[u.id]).length, 'comptes créés mais pas utilisés')}</div>
     <p class="note" style="margin:12px 0">Un <b>code</b> donné par Wassi reste visible ici. Un <b>mot de passe personnel</b>, choisi par la personne, est secret : personne ne peut le lire, même vous. Si elle l'oublie, « Nouveau code » lui en crée un provisoire.</p>
@@ -463,6 +463,18 @@ function pushHint() {
 
 Object.assign(A, {
   eye: (d, el) => { const i = el.parentElement.querySelector('input'); if (!i) return; i.type = i.type === 'password' ? 'text' : 'password'; el.classList.toggle('on', i.type === 'text'); i.focus(); },
+  'shop-del': d => { const s = S.shops.find(x => x.id === d.id); if (!s || U.role !== 'ceo') return;
+    const bal = balance(s.name), run = S.orders.filter(o => o.shop === s.name && !CLOSED.includes(o.status)).length, pcsN = sum(S.stock.filter(i => i.shop === s.name), i => i.qty) + sum(S.takes.filter(t => t.shop === s.name), t => t.qty);
+    V.modal = { t: 'html', title: 'Supprimer ' + s.name + ' ?', html: () => `<p style="color:var(--ink-2);margin-bottom:12px">La boutique disparaît de l'application, son e-commerçant est déconnecté et ne pourra plus se connecter, et son Google Sheet n'est plus lu. L'historique de ses livraisons reste dans vos chiffres.</p>
+      ${bal ? `<div class="insight alert" style="margin-bottom:8px">${ico('alert')}<div>Son solde est de <b>${F(bal)}</b>. Pensez à le régler avant de supprimer.</div></div>` : ''}
+      ${pcsN > 0 ? `<div class="insight alert" style="margin-bottom:8px">${ico('alert')}<div>Il reste <b>${pcsN} pièce(s)</b> de son stock chez Wassi. Elles seront retirées de l'app.</div></div>` : ''}
+      ${run ? `<div class="insight alert" style="margin-bottom:8px">${ico('alert')}<div><b>${run} commande(s) en cours</b> seront annulées.</div></div>` : ''}
+      <div class="actions fill" style="margin-top:14px"><button class="btn line" data-a="close">Annuler</button><button class="btn danger" data-a="shop-del-ok" data-id="${esc(s.id)}">Supprimer définitivement</button></div>` }; renderModal(); },
+  'shop-del-ok': d => { const s = S.shops.find(x => x.id === d.id); if (!s || U.role !== 'ceo') return; const at = Date.now();
+    S.orders.filter(o => o.shop === s.name && !CLOSED.includes(o.status)).forEach(o => { if (o.driver) notify({ toUser: o.driver, title: 'Livraison retirée', text: `${o.client} · ${o.product} : boutique supprimée.`, orderId: o.id });
+      release(o); o.status = 'annule'; o.driver = null; o.reason = 'Boutique supprimée'; o.updatedAt = at; o.history.push({ at, by: U.name, text: 'Annulée : boutique supprimée' }); Remote.push({ t: 'order', o }); });
+    S.users = S.users.filter(u => !(u.role === 'marchand' && u.shop === s.name)); S.stock = S.stock.filter(i => i.shop !== s.name); S.dispatch = S.dispatch.filter(x => x.shop !== s.name); S.shops = S.shops.filter(x => x.id !== s.id);
+    V.sub = null; V.modal = null; renderModal(); blob('stock', 'dispatch'); syncCfg(); toast('Boutique supprimée', s.name + ' n\'a plus accès à l\'application.'); },
   'fee-ok': d => { const o = order(d.id); if (!o || !MONEY()) return; o.feeSet = true; commit(o, 'Frais validés : ' + F(wfee(o))); },
   'fee-all': () => { const l = feePending(); if (!MONEY() || !l.length || !confirm(`Valider les frais proposés pour ${l.length} livraison(s) ?`)) return;
     l.forEach(o => { o.feeSet = true; o.history.push({ at: Date.now(), by: U.name, text: 'Frais validés : ' + F(wfee(o)) }); o.updatedAt = Date.now(); Remote.push({ t: 'order', o }); }); persist(); render(); toast('Frais validés', l.length + ' livraison(s) ajoutée(s) aux soldes des boutiques.'); },
