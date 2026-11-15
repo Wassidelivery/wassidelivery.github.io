@@ -676,7 +676,7 @@ const A = {
   bell: () => { V.modal = { t: 'notifs' }; localStorage.setItem(LS('wassi.read.') + U.id, Date.now()); render(); },
   open: d => { V.modal = { t: 'order', id: d.id }; renderModal(); },
   close: () => { V.modal = null; renderModal(); }, 'close-bg': (d, el, e) => { if (e.target === el) A.close(); },
-  simulate, reset: () => { if (confirm('Remettre les données de démonstration à zéro ?')) { S = seed(); persist(); render(); } },
+  simulate, reset: () => ask('Remettre les données de démonstration à zéro ?', () => { S = seed(); persist(); render(); }, { danger: true, ok: 'Remettre à zéro' }),
   confirm: d => Biz.confirm(order(d.id)),
   assign: d => { Biz.assign(order(d.id), d.d); toast('Envoyée', 'Le livreur ' + uname(d.d) + ' a été notifié.'); },
   status: d => { const o = order(d.id); if (d.s === 'reporte') { V.modal = { t: 'retry', id: o.id, prev: V.modal }; return renderModal(); } if (o.status !== d.s) Biz.setStatus(o, d.s); },
@@ -687,9 +687,9 @@ const A = {
     { k: 'sexe', l: 'Client', opts: [['F', 'Femme'], ['H', 'Homme']] }],
     v => { const price = parseInt(v.price, 10); if (!v.client.trim() || digits(v.phone).length < 8 || !v.product.trim() || !(price > 0)) return 'Nom, téléphone, produit et montant sont obligatoires.';
       Biz.incoming({ shop: v.shop, client: v.client.trim(), phone: v.phone.trim(), product: v.product.trim(), price, qty: Math.max(1, parseInt(v.qty, 10) || 1), zone: v.zone, sexe: v.sexe, closer: U.role === 'closeuse' ? U.id : null }, true); }),
-  'cash-in': d => { const l = cashDue(d.id), amt = sum(l, o => o.price); if (!l.length || !confirm(`Confirmer que ${uname(d.id)} a remis ${F(amt)} ?`)) return; const at = Date.now();
+  'cash-in': d => { const l = cashDue(d.id), amt = sum(l, o => o.price); if (!l.length) return; ask(`Confirmer que ${uname(d.id)} a remis ${F(amt)} ?`, () => { const at = Date.now();
     l.forEach(o => { o.cashIn = at; o.history.push({ at, by: U.name, text: 'Argent remis à la caisse' }); Remote.push({ t: 'order', o }); });
-    notify({ toUser: d.id, title: 'Versement reçu', text: `${F(amt)} bien reçus par ${U.name}. Merci !` }); commit(); toast('Versement enregistré', `${uname(d.id)} · ${F(amt)}`); },
+    notify({ toUser: d.id, title: 'Versement reçu', text: `${F(amt)} bien reçus par ${U.name}. Merci !` }); commit(); toast('Versement enregistré', `${uname(d.id)} · ${F(amt)}`); }, { ok: 'Oui, reçu' }); },
   'goal-save': () => { const g = parseInt($('#goal').value, 10); if (!(g > 0)) return toast('À corriger', 'Entrez un nombre de livraisons.'); localStorage.setItem(LS('wassi.goal'), g); toast('Objectif enregistré', g + ' livraisons par jour.'); render(); },
   backup: () => download(`wassi-sauvegarde-${today()}.json`, JSON.stringify(S), 'application/json'),
   restore: () => $('#restore').click(),
@@ -713,7 +713,7 @@ const A = {
   install: async () => { if (deferredInstall) { deferredInstall.prompt(); deferredInstall = null; render(); } },
   'api-save': () => { const v = $('#api').value.trim(); if (v && !/^https:\/\/script\.google\.com\/.+\/exec$/.test(v)) return toast('Adresse invalide', 'Elle doit commencer par https://script.google.com/ et finir par /exec.');
     v ? localStorage.setItem('wassi.api', v) : localStorage.removeItem('wassi.api'); location.reload(); },
-  'api-off': () => { if (confirm('Déconnecter cet appareil du serveur et revenir aux données de démonstration ?')) { localStorage.setItem('wassi.api', 'off'); localStorage.removeItem(LS('wassi.token')); location.reload(); } },
+  'api-off': () => ask('Déconnecter cet appareil du serveur et revenir aux données de démonstration ?', () => { localStorage.setItem('wassi.api', 'off'); localStorage.removeItem(LS('wassi.token')); location.reload(); }, { danger: true, ok: 'Déconnecter' }),
   'shop-plan': d => { const s = S.shops.find(x => x.id === d.id); s.plan = s.plan === 'actif' ? 'essai' : 'actif'; syncCfg(); },
   'shop-trial': d => { const s = S.shops.find(x => x.id === d.id); s.trialEnd = Math.max(Date.now(), s.trialEnd) + 30 * DAY; syncCfg(); },
   'shop-sheet': d => { const s = S.shops.find(x => x.id === d.id); form('Google Sheet de ' + s.name, [{ k: 'sheetId', l: 'Lien ou identifiant du Google Sheet', v: s.sheetId, ph: 'https://docs.google.com/spreadsheets/d/…' }], v => { s.sheetId = sheetId(v.sheetId); syncCfg(); }); },

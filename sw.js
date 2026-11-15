@@ -1,5 +1,5 @@
 // Service worker WASSI DELIVERY : l'app s'ouvre même sans connexion.
-const VERSION = 'wassi-v9';
+const VERSION = 'wassi-v10';
 const SHELL = ['./', 'index.html', 'css/app.css', 'js/config.js', 'js/app.js', 'js/pro.js', 'js/auth.js', 'js/views.js', 'manifest.webmanifest',
   'icons/icon-96.png', 'icons/icon-192.png', 'icons/icon-512.png'];
 

@@ -149,7 +149,8 @@ Object.assign(A, {
       u.name = v.name.trim(); u.email = email; if (v.role) { u.role = v.role; u.salary = parseInt(v.salary, 10) || 0; v.free ? u.free = true : delete u.free; }
       if (email && !u.pass && !u.ph) u.pass = genCode(); syncCfg(); }); },
   'user-code': d => { const u = user(d.id); if (!u.email) return toast('E-mail manquant', 'Ajoutez d\'abord l\'adresse e-mail de ' + u.name + '.');
-    if ((u.pass || u.ph) && !confirm(`Créer un nouveau code pour ${u.name} ? L'ancien ne fonctionnera plus.`)) return; u.pass = genCode(); delete u.ph; syncCfg(); showAccess(u); },
+    const go = () => { u.pass = genCode(); delete u.ph; syncCfg(); showAccess(u); };
+    if (u.pass || u.ph) ask(`Créer un nouveau code pour ${u.name} ? L'ancien ne fonctionnera plus.`, go, { ok: 'Créer le code' }); else go(); },
   'user-show': d => showAccess(user(d.id)),
   'user-ok': d => { const u = user(d.id); if (!u) return;
     // Un membre déjà connu (repris de l'ancienne app) récupère simplement son e-mail et son code.
@@ -157,13 +158,13 @@ Object.assign(A, {
     const t = twin || u; if (twin) { twin.email = u.email; twin.phone = u.phone; delete twin.gone; S.users = S.users.filter(x => x !== u); }
     delete t.status; if (t.role !== 'marchand') t.pass = genCode();
     syncCfg(); if (t.role === 'marchand') toast('Compte validé', t.name + ' peut se connecter avec son mot de passe.'); else showAccess(t); },
-  'user-no': d => { if (confirm('Refuser cette demande de compte ?')) { S.users = S.users.filter(u => u.id !== d.id); syncCfg(); } },
+  'user-no': d => ask('Refuser cette demande de compte ?', () => { S.users = S.users.filter(u => u.id !== d.id); syncCfg(); }, { danger: true, ok: 'Refuser' }),
   'user-del': d => { const u = user(d.id), used = S.orders.some(o => o.driver === u.id || o.closer === u.id);
-    if (!confirm(`Retirer ${u.name} ? Cette personne sera déconnectée et ne pourra plus ouvrir l'application.`)) return;
+    ask(`Retirer ${u.name} ? Cette personne sera déconnectée et ne pourra plus ouvrir l'application.`, () => {
     // On garde le nom dans l'historique des livraisons, mais le compte est fermé.
     if (used) { u.gone = true; u.email = ''; delete u.pass; delete u.ph; } else S.users = S.users.filter(x => x.id !== u.id);
     S.orders.filter(o => o.driver === u.id && o.status === 'assigne').forEach(o => { o.driver = null; o.status = 'confirme'; o.reason = 'Livreur retiré : à réassigner'; Remote.push({ t: 'order', o }); });
-    syncCfg(); toast('Accès retiré', u.name + ' ne peut plus se connecter.'); },
+    syncCfg(); toast('Accès retiré', u.name + ' ne peut plus se connecter.'); }, { danger: true, ok: 'Retirer' }); },
   'my-email': () => form('Mon adresse e-mail', [{ k: 'email', l: 'Nouvelle adresse e-mail', t: 'email', v: U.email || '' }, { k: 'pass', l: 'Mot de passe actuel', t: 'password' }],
     v => { const email = v.email.trim().toLowerCase(), o = byEmail(email); if (!validEmail(email)) return 'Adresse e-mail invalide.'; if (o && o.id !== U.id) return 'Cet e-mail est déjà utilisé.';
       if (!Remote.on && !checkPass(U, v.pass)) return 'Mot de passe actuel incorrect.'; U.email = email; syncCfg(); toast('E-mail modifié', email); }),

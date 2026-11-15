@@ -82,6 +82,15 @@ function doUpload() {
 }
 const save = (...keys) => { blob(...keys); persist(); render(); };
 
+/* ================= Confirmation ================= */
+// Remplace la boîte « OK / Annuler » du navigateur, que certains appareils bloquent sans rien afficher.
+function ask(text, onYes, opt = {}) {
+  V.modal = { t: 'html', title: opt.title || 'Confirmer', yes: onYes, prev: V.modal && V.modal.t === 'order' ? V.modal : null,
+    html: () => `<p style="color:var(--ink-2);white-space:pre-line;margin-bottom:16px">${esc(text)}</p>
+      <div class="actions fill"><button class="btn line" data-a="back">Annuler</button><button class="btn ${opt.danger ? 'danger' : 'primary'}" data-a="ask-yes">${esc(opt.ok || 'Confirmer')}</button></div>` };
+  renderModal();
+}
+
 /* ================= Stock ================= */
 const stockItem = (shop, product, make) => {
   let it = S.stock.find(i => i.shop === shop && norm(i.product) === norm(product));
@@ -170,12 +179,13 @@ ${sp(fin - gain)} + ${sp(gain)} = ${sp(fin)} FCFA`;
 
 /* ================= Reprise de l'ancienne application (fichier .json) ================= */
 const isOldBackup = d => d && Array.isArray(d.orders) && (Array.isArray(d.merchants) || (d.orders[0] && 'dateStr' in d.orders[0]));
-function importOld(d) {
+function importOld(d, keep) {
   const now = Date.now(), ts = s => { const t = new Date(String(s) + 'T12:00:00').getTime(); return isNaN(t) ? now : t; };
-  const users = S.users.filter(u => u.role === 'ceo'), charges = [], roleMap = { livreur: 'livreur', closeuse: 'closeuse', assistante: 'assistante', freelance: 'livreur' };
+  const users = keep ? keep.users.map(u => ({ ...u })) : S.users.filter(u => u.role === 'ceo'), charges = [], roleMap = { livreur: 'livreur', closeuse: 'closeuse', assistante: 'assistante', freelance: 'livreur' };
   (d.team || []).forEach(t => { const r = roleMap[norm(t.role)], sal = +t.baseSalary || 0;
-    if (!r) return charges.push({ id: uid('c'), name: t.name + ' (' + t.role + ')', amt: sal });
-    if (users.some(u => u.role === r && norm(u.name) === norm(t.name))) return;
+    if (!r) return charges.push({ id: uid('c'), name: t.name + ' (' + t.role + ')', amt: sal, old: 1 });
+    const known = users.find(u => u.role === r && norm(u.name) === norm(t.name));
+    if (known) { known.salary = sal; if (norm(t.role) === 'freelance') known.free = true; return; }   // compte déjà dans l'app : on ne touche ni à l'e-mail ni au code
     const u = { id: 'u_' + slug(t.name) + '_' + r[0], name: String(t.name).trim(), role: r, salary: sal, email: '' }; if (norm(t.role) === 'freelance') u.free = true; users.push(u); });
   const who = (name, role) => {                 // retrouve la personne ; les anciens membres restent dans l'historique sans accès
     if (!name || norm(name) === 'non') return null;
@@ -183,7 +193,8 @@ function importOld(d) {
     if (!u) { u = { id: 'u_' + slug(name) + '_' + role[0], name: String(name).trim(), role, salary: 0, email: '', gone: true }; users.push(u); }
     return u.id;
   };
-  const shops = [], bal = {}, shopFor = name => { const n = String(name || 'SANS NOM').trim(); let s = shops.find(x => norm(x.name) === norm(n));
+  const shops = keep ? keep.shops.map(x => ({ ...x })) : [], bal = {}; shops.forEach(x => { bal[x.name] = 0; });
+  const shopFor = name => { const n = String(name || 'SANS NOM').trim(); let s = shops.find(x => norm(x.name) === norm(n));
     if (!s) { s = { id: 's_' + slug(n), name: n, sheetId: '', plan: 'essai', trialEnd: now + 30 * DAY }; shops.push(s); bal[s.name] = 0; } return s; };
   (d.merchants || []).forEach(m => { const s = shopFor(m.name); bal[s.name] += +m.balance || 0; if (m.nextStorageFeeDate) s.storageDue = m.nextStorageFeeDate; });
   const orders = (d.orders || []).map((x, i) => { const at = ts(x.dateStr), ret = !!x.isRetour, closer = who(x.closeuse, 'closeuse');
@@ -192,34 +203,57 @@ function importOld(d) {
       status: ret ? 'annule' : 'livre', ...(ret ? { reason: 'Retour' } : { deliveredAt: at, validatedAt: at, cashIn: at }), driver: who(x.livreur, 'livreur'), closer,
       createdAt: at, transferred: true, stk: 'x', old: 1, history: [] }; });
   const moves = [];
-  (d.merchantMoves || []).forEach(m => { const s = shopFor(m.merchantName), amt = +m.montant || 0; moves.push({ id: 'v' + m.id, at: ts(m.dateStr), type: amt < 0 ? 'pay' : 'badj', shop: s.name, amt, note: m.note || (amt < 0 ? 'Reversement' : 'Ajustement') }); });
-  (d.depenses || []).forEach(x => moves.push({ id: 'd' + x.id, at: ts(x.dateStr), type: 'dep', cat: x.type || 'Autre', amt: +x.montant || 0, note: x.note || '' }));
-  (d.caisseAdjustments || []).forEach(x => moves.push({ id: 'j' + x.id, at: ts(x.dateStr), type: 'adj', amt: +x.montant || 0, note: x.note || '' }));
+  (d.merchantMoves || []).forEach(m => { const s = shopFor(m.merchantName), amt = +m.montant || 0; moves.push({ id: 'v' + m.id, at: ts(m.dateStr), type: amt < 0 ? 'pay' : 'badj', shop: s.name, amt, note: m.note || (amt < 0 ? 'Reversement' : 'Ajustement'), old: 1 }); });
+  (d.depenses || []).forEach(x => moves.push({ id: 'd' + x.id, at: ts(x.dateStr), type: 'dep', cat: x.type || 'Autre', amt: +x.montant || 0, note: x.note || '', old: 1 }));
+  (d.caisseAdjustments || []).forEach(x => moves.push({ id: 'j' + x.id, at: ts(x.dateStr), type: 'adj', amt: +x.montant || 0, note: x.note || '', old: 1 }));
   // Solde d'ouverture : ce qu'il faut pour retrouver exactement le solde de l'ancienne application.
   shops.forEach(s => { s.open = (bal[s.name] || 0) - sum(orders.filter(o => o.shop === s.name && o.status === 'livre'), o => o.price - wfee(o)) - sum(moves.filter(m => m.shop === s.name), m => m.amt); });
   const stock = []; (d.inventory || []).forEach(i => { const s = shopFor(i.merchant), p = String(i.product || '').trim(); let it = stock.find(x => x.shop === s.name && norm(x.product) === norm(p));
     if (!it) { it = { id: 'k' + i.id, shop: s.name, product: p, qty: 0 }; stock.push(it); } it.qty += +i.stock || 0; });
-  const seenG = new Set(), goals = (d.goals || []).filter(g => !seenG.has(g.id) && seenG.add(g.id)).map(g => ({ id: 'g' + g.id, type: g.type || 'epargne', name: g.name, target: +g.target || 0, current: +g.current || 0 }));
+  const seenG = new Set(), goals = (d.goals || []).filter(g => !seenG.has(g.id) && seenG.add(g.id)).map(g => ({ id: 'g' + g.id, type: g.type || 'epargne', name: g.name, target: +g.target || 0, current: +g.current || 0, old: 1 }));
   return { v: 1, users, shops, orders, notifs: [], stock, takes: [], moves, pos: {}, goals, charges, cfg: S.cfg || {}, createdAt: now, importedAt: now };
+}
+// Ce qui venait de l'ancienne application lors d'une reprise précédente (remplacé à chaque mise à jour).
+const fromOld = { move: m => !!m.old || /^[vdj]/.test(String(m.id)), goal: g => !!g.old || /^g\d+$/.test(String(g.id)), charge: c => !!c.old || /\(.+\)$/.test(String(c.name)) };
+// Mise à jour à partir d'une nouvelle sauvegarde de l'ancienne application : ses livraisons, soldes, stocks, dépenses
+// et caisse remplacent ceux de la reprise précédente ; tout ce qui a été fait dans la nouvelle app est conservé.
+function mergeOld(d) {
+  const n = importOld(d, { users: S.users, shops: S.shops }), mine = S.orders.filter(o => !o.old);
+  // Stock au bureau = stock de l'ancienne app, moins ce que la nouvelle app a déjà sorti (livraisons et passages des livreurs).
+  const out = (shop, product) => sum(mine.filter(o => o.stk === 'b' && o.shop === shop && norm(o.product) === norm(product)), o => o.qty || 1)
+    + sum(S.takes.filter(t => t.kind !== 'liv' && sameProd(t, shop, product)), t => t.qty);
+  n.stock.forEach(i => { const ex = S.stock.find(x => x.shop === i.shop && norm(x.product) === norm(i.product)); if (ex) i.id = ex.id; i.qty -= out(i.shop, i.product); });
+  n.stock = n.stock.concat(S.stock.filter(x => !n.stock.some(i => i.shop === x.shop && norm(i.product) === norm(x.product))));
+  n.orders = n.orders.concat(mine);
+  n.moves = n.moves.concat(S.moves.filter(m => !fromOld.move(m)));
+  n.goals = n.goals.concat(S.goals.filter(g => !fromOld.goal(g)));
+  n.charges = n.charges.concat(S.charges.filter(c => !fromOld.charge(c)));
+  return Object.assign(n, { notifs: S.notifs, takes: S.takes, pos: S.pos, dispatch: S.dispatch, seen: S.seen || {}, cfg: S.cfg || {}, createdAt: S.createdAt || n.createdAt });
+}
+function finishImport(n, text) {
+  S = upgrade(n); U = user(U.id) || S.users.find(u => u.role === 'ceo'); Undo.stack = [];
+  if (Remote.on) Remote.push({ t: 'import', state: S });
+  persist(); V.range = '30'; render();
+  toast('Données mises à jour', text || `${S.orders.length} commandes · ${S.shops.length} boutiques.`);
 }
 function applyImport(d) {
   if (isOldBackup(d)) {
-    const n = importOld(d);
-    if (!confirm(`Reprendre l'ancienne application ?\n\n${n.orders.length} livraisons · ${n.shops.length} boutiques · ${n.stock.length} produits en stock · ${n.users.length - 1} membres d'équipe\n\nLes données actuelles de l'app seront remplacées.`)) return false;
-    S = n;
-  } else {
-    if (!d || d.v !== 1 || !Array.isArray(d.orders) || !Array.isArray(d.users)) throw new Error('format');
-    if (!d.users.some(u => u.role === 'ceo')) d.users.push(...S.users.filter(u => u.role === 'ceo'));
-    if (!confirm(`Remplacer les données actuelles par cette sauvegarde (${d.orders.length} commandes) ?`)) return false;
-    S = upgrade(d);
+    // Données d'exemple sur cet appareil : on les remplace. Sinon, on met à jour sans rien perdre de la nouvelle app.
+    const demo = !Remote.on && !S.importedAt && !S.orders.some(o => o.old);
+    if (demo) { const n = importOld(d);
+      return ask(`Reprendre l'ancienne application ?\n\n${n.orders.length} livraisons · ${n.shops.length} boutiques · ${n.stock.length} produits en stock · ${n.users.length - 1} membres d'équipe\n\nLes données d'exemple seront remplacées.`, () => finishImport(n), { title: 'Reprise des données', ok: 'Reprendre' }); }
+    const n = mergeOld(d), before = S.orders.filter(o => o.old).length, now = n.orders.filter(o => o.old).length, kept = n.orders.length - now, newShops = n.shops.length - S.shops.length, newTeam = n.users.length - S.users.length;
+    return ask(`Cette sauvegarde de l'ancienne application va mettre à jour :\n\n• ${now} livraisons de l'ancienne app (${before} avant)\n• ${n.shops.length} boutiques${newShops > 0 ? `, dont ${newShops} nouvelle(s)` : ''}\n• les soldes, le stock, les dépenses et la caisse${newTeam > 0 ? `\n• ${newTeam} nouveau(x) membre(s) d'équipe` : ''}\n\nSont conservés : les comptes et leurs codes, les liens Google Sheets, les abonnements, la répartition${kept ? ` et les ${kept} commande(s) passée(s) dans la nouvelle app` : ''}.`,
+      // La fusion est refaite au moment du clic, pour ne perdre aucune commande arrivée entre-temps.
+      () => { const m = mergeOld(d); finishImport(m, `${m.orders.filter(o => o.old).length} livraisons de l'ancienne app · ${m.shops.length} boutiques.`); }, { title: 'Mettre à jour les données ?', ok: 'Mettre à jour' });
   }
-  U = user(U.id) || S.users.find(u => u.role === 'ceo'); Undo.stack = [];
-  if (Remote.on) Remote.push({ t: 'import', state: S });
-  persist(); V.range = '30'; render();
-  toast('Données chargées', `${S.orders.length} commandes · ${S.shops.length} boutiques.`); return true;
+  if (!d || d.v !== 1 || !Array.isArray(d.orders) || !Array.isArray(d.users)) throw new Error('format');
+  if (!d.users.some(u => u.role === 'ceo')) d.users.push(...S.users.filter(u => u.role === 'ceo'));
+  ask(`Remplacer toutes les données actuelles par cette sauvegarde de l'app (${d.orders.length} commandes) ?\n\nTout ce qui a été fait depuis cette sauvegarde sera perdu.`, () => finishImport(d), { title: 'Restaurer une sauvegarde', ok: 'Remplacer', danger: true });
 }
 function importFile(file) {
-  return file.text().then(t => applyImport(JSON.parse(t))).catch(() => toast('Fichier non reconnu', 'Choisissez une sauvegarde Wassi (.json), de cette app ou de l\'ancienne.'));
+  // En mode connecté, on relit d'abord le serveur pour partir des données les plus récentes.
+  return file.text().then(async t => { const d = JSON.parse(t); if (Remote.on) await Remote.pull(); applyImport(d); }).catch(() => toast('Fichier non reconnu', 'Choisissez une sauvegarde Wassi (.json), de cette app ou de l\'ancienne.'));
 }
 
 /* ================= Carte de la ville ================= */
@@ -301,6 +335,7 @@ const drop = (k, id) => { S[k] = S[k].filter(x => x.id !== id); };
 Object.assign(A, {
   back: () => { if (history.state && history.state.w) history.back(); else if (!Nav.back()) toast('Premier écran', 'Il n\'y a pas d\'écran précédent.'); },
   undo: () => Undo.run(),
+  'ask-yes': () => { const m = V.modal; if (!m || !m.yes) return; V.modal = m.prev || null; renderModal(); m.yes(); },
   country: d => { if (!COUNTRIES[d.id]) return; localStorage.setItem('wassi.country', d.id); location.reload(); },
   'country-change': () => { localStorage.removeItem('wassi.country'); V.modal = null; renderModal(); render(); },
   'upload-yes': () => doUpload(), 'upload-no': () => { localStorage.setItem(LS('wassi.noupload'), '1'); V.modal = null; renderModal(); }, 'upload-ask': () => offerUpload(true),
@@ -327,7 +362,7 @@ Object.assign(A, {
     { note: 'Si le produit existe déjà, la quantité s\'ajoute au stock actuel.' }),
   'stock-set': d => { const it = S.stock.find(i => i.id === d.id); form(`${it.product} — ${it.shop}`, [{ k: 'qty', l: 'Quantité réelle au bureau (pièces)', n: 1, v: String(it.qty) }],
     v => { if (!/^-?\d+$/.test(v.qty.trim())) return 'Entrez un nombre.'; it.qty = num(v.qty); save('stock'); }, { note: 'Sert à corriger une erreur de saisie ou après un inventaire.' }); },
-  'stock-del': d => { const it = S.stock.find(i => i.id === d.id); if (it && confirm(`Supprimer « ${it.product} » du stock de ${it.shop} ?`)) { drop('stock', d.id); save('stock'); } },
+  'stock-del': d => { const it = S.stock.find(i => i.id === d.id); if (it) ask(`Supprimer « ${it.product} » du stock de ${it.shop} ?`, () => { drop('stock', d.id); save('stock'); }, { danger: true, ok: 'Supprimer' }); },
   'take-add': d => { const self = U.role === 'livreur', opts = stockOpts(); if (!opts.length) return toast('Stock vide', 'Ajoutez d\'abord des produits au stock des boutiques.');
     form(self ? 'Passage au bureau' : 'Passage d\'un livreur au bureau', [...(self ? [] : [{ k: 'driver', l: 'Livreur', opts: byRole('livreur').map(u => [u.id, u.name]), v: d.id }]),
       { k: 'kind', l: 'Mouvement', opts: [['take', 'Prend des pièces'], ['ret', 'Rend des pièces au bureau']] }, { k: 'item', l: 'Produit', opts }, { k: 'qty', l: 'Nombre de pièces', n: 1 }],
@@ -337,8 +372,8 @@ Object.assign(A, {
         const s = v.kind === 'take' ? 1 : -1; it.qty -= s * q; S.takes.push({ id: uid('t'), at: Date.now(), driver: drv, shop: it.shop, product: it.product, qty: s * q, kind: v.kind, by: U.name });
         notify(self ? { toRole: 'assistante', title: 'Passage au bureau', text: `${U.name} ${s > 0 ? 'a pris' : 'a rendu'} ${q} × ${it.product} (${it.shop}).` } : { toUser: drv, title: s > 0 ? 'Stock remis' : 'Stock rendu', text: `${q} × ${it.product} (${it.shop}) — enregistré par ${U.name}.` });
         save('stock', 'takes'); }); },
-  'take-del': d => { const t = S.takes.find(x => x.id === d.id); if (!t || t.kind === 'liv' || !confirm('Supprimer ce passage ? Le stock du bureau sera corrigé.')) return;
-    stockItem(t.shop, t.product, true).qty += t.qty; drop('takes', t.id); save('stock', 'takes'); },
+  'take-del': d => { const t = S.takes.find(x => x.id === d.id); if (!t || t.kind === 'liv') return;
+    ask('Supprimer ce passage ? Le stock du bureau sera corrigé.', () => { stockItem(t.shop, t.product, true).qty += t.qty; drop('takes', t.id); save('stock', 'takes'); }, { danger: true, ok: 'Supprimer' }); },
 
   /* ---- soldes et caisse ---- */
   'pay-out': d => { const b = balance(d.id); form('Reverser à ' + d.id, [{ k: 'amt', l: `Montant reversé (F) — solde actuel ${F(b)}`, n: 1, v: String(Math.max(0, b)) }, { k: 'note', l: 'Note (facultatif)', ph: 'Espèces, Nita, Amana…' }],
@@ -354,17 +389,17 @@ Object.assign(A, {
       if (U.role !== 'ceo') notify({ toRole: 'ceo', title: 'Dépense enregistrée', text: `${v.cat} · ${F(amt)}${v.note.trim() ? ' · ' + v.note.trim() : ''} (${U.name})` }); save('moves'); }),
   'adj-add': () => form('Ajuster la caisse Wassi', [{ k: 'dir', l: 'Sens', opts: [['1', 'Entrée d\'argent'], ['-1', 'Sortie d\'argent (retrait, salaires…)']] }, { k: 'amt', l: 'Montant (F)', n: 1 }, { k: 'note', l: 'Motif' }],
     v => { const amt = num(v.amt); if (amt <= 0 || !v.note.trim()) return 'Montant et motif obligatoires.'; S.moves.push({ id: uid('m'), at: Date.now(), type: 'adj', amt: +v.dir * amt, note: v.note.trim(), by: U.name }); save('moves'); }),
-  'move-del': d => { const m = S.moves.find(x => x.id === d.id); if (m && confirm(`Supprimer cette ligne (${F(Math.abs(m.amt))}) ? Les soldes seront recalculés.`)) { drop('moves', d.id); save('moves'); } },
+  'move-del': d => { const m = S.moves.find(x => x.id === d.id); if (m) ask(`Supprimer cette ligne (${F(Math.abs(m.amt))}) ? Les soldes seront recalculés.`, () => { drop('moves', d.id); save('moves'); }, { danger: true, ok: 'Supprimer' }); },
   'goal-add': () => form('Nouvelle épargne ou objectif', [{ k: 'type', l: 'Type', opts: [['epargne', 'Épargne'], ['objectif', 'Objectif']] }, { k: 'name', l: 'Nom', ph: 'Achat d\'une nouvelle moto' }, { k: 'target', l: 'Montant visé (F)', n: 1, v: '0' }, { k: 'current', l: 'Déjà mis de côté (F)', n: 1, v: '0' }],
     v => { if (!v.name.trim()) return 'Donnez un nom.'; S.goals.push({ id: uid('g'), type: v.type, name: v.name.trim(), target: num(v.target), current: num(v.current) }); save('goals'); }),
   'goal-set': d => { const g = S.goals.find(x => x.id === d.id); form(g.name, [{ k: 'current', l: 'Montant mis de côté (F)', n: 1, v: String(g.current) }, { k: 'target', l: 'Montant visé (F)', n: 1, v: String(g.target) }],
     v => { g.current = num(v.current); g.target = num(v.target); save('goals'); }); },
-  'goal-del': d => { if (confirm('Supprimer cette ligne ?')) { drop('goals', d.id); save('goals'); } },
+  'goal-del': d => ask('Supprimer cette ligne ?', () => { drop('goals', d.id); save('goals'); }, { danger: true, ok: 'Supprimer' }),
   'charge-add': () => form('Charge fixe mensuelle', [{ k: 'name', l: 'Nom', ph: 'Internet, loyer, salaire du CEO…' }, { k: 'amt', l: 'Montant par mois (F)', n: 1 }],
     v => { const amt = num(v.amt); if (!v.name.trim() || amt <= 0) return 'Nom et montant obligatoires.'; S.charges.push({ id: uid('c'), name: v.name.trim(), amt }); save('charges'); }),
-  'charge-del': d => { if (confirm('Supprimer cette charge fixe ?')) { drop('charges', d.id); save('charges'); } },
-  'shop-storage': d => { const s = S.shops.find(x => x.id === d.id); if (!confirm(`Valider le paiement du stockage de ${s.name} pour 3 mois de plus ?`)) return;
-    const t = new Date((s.storageDue || today()) + 'T12:00:00'); t.setMonth(t.getMonth() + 3); s.storageDue = dayKey(t.getTime()); syncCfg(); },
+  'charge-del': d => ask('Supprimer cette charge fixe ?', () => { drop('charges', d.id); save('charges'); }, { danger: true, ok: 'Supprimer' }),
+  'shop-storage': d => { const s = S.shops.find(x => x.id === d.id); ask(`Valider le paiement du stockage de ${s.name} pour 3 mois de plus ?`, () => {
+    const t = new Date((s.storageDue || today()) + 'T12:00:00'); t.setMonth(t.getMonth() + 3); s.storageDue = dayKey(t.getTime()); syncCfg(); }, { ok: 'Valider' }); },
   'shop-add': () => form('Nouvelle boutique', [{ k: 'name', l: 'Nom de la boutique' }, { k: 'sheetId', l: 'Lien du Google Sheet des commandes (facultatif)', ph: 'https://docs.google.com/spreadsheets/d/…' }],
     v => { const name = v.name.trim().toUpperCase(); if (!name || S.shops.some(s => norm(s.name) === norm(name))) return 'Donnez un nom de boutique qui n\'existe pas encore.';
       S.shops.push({ id: uid('s'), name, sheetId: sheetId(v.sheetId), plan: 'essai', trialEnd: Date.now() + 30 * DAY }); syncCfg(); }, { note: 'L\'essai gratuit de 30 jours démarre maintenant. Créez ensuite l\'accès de l\'e-commerçant depuis sa fiche.' }),
@@ -476,8 +511,8 @@ Object.assign(A, {
     S.users = S.users.filter(u => !(u.role === 'marchand' && u.shop === s.name)); S.stock = S.stock.filter(i => i.shop !== s.name); S.dispatch = S.dispatch.filter(x => x.shop !== s.name); S.shops = S.shops.filter(x => x.id !== s.id);
     V.sub = null; V.modal = null; renderModal(); blob('stock', 'dispatch'); syncCfg(); toast('Boutique supprimée', s.name + ' n\'a plus accès à l\'application.'); },
   'fee-ok': d => { const o = order(d.id); if (!o || !MONEY()) return; o.feeSet = true; commit(o, 'Frais validés : ' + F(wfee(o))); },
-  'fee-all': () => { const l = feePending(); if (!MONEY() || !l.length || !confirm(`Valider les frais proposés pour ${l.length} livraison(s) ?`)) return;
-    l.forEach(o => { o.feeSet = true; o.history.push({ at: Date.now(), by: U.name, text: 'Frais validés : ' + F(wfee(o)) }); o.updatedAt = Date.now(); Remote.push({ t: 'order', o }); }); persist(); render(); toast('Frais validés', l.length + ' livraison(s) ajoutée(s) aux soldes des boutiques.'); },
+  'fee-all': () => { const l = feePending(); if (!MONEY() || !l.length) return; ask(`Valider les frais proposés pour ${l.length} livraison(s) ?`, () => {
+    l.forEach(o => { o.feeSet = true; o.history.push({ at: Date.now(), by: U.name, text: 'Frais validés : ' + F(wfee(o)) }); o.updatedAt = Date.now(); Remote.push({ t: 'order', o }); }); persist(); render(); toast('Frais validés', l.length + ' livraison(s) ajoutée(s) aux soldes des boutiques.'); }, { ok: 'Tout valider' }); },
   'disp-auto': () => { const clos = byRole('closeuse'); if (!clos.length) return toast('Aucune closeuse', 'Ajoutez d\'abord les closeuses dans Réglages.');
     const cnt = n => S.orders.filter(o => o.shop === n && o.status === 'nouveau').length; V.disp = {};
     S.shops.slice().sort((a, b) => cnt(b.name) - cnt(a.name) || a.name.localeCompare(b.name)).forEach((s, i) => { V.disp[s.name] = clos[i % clos.length].id; }); render(); },

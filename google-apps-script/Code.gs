@@ -300,12 +300,14 @@ function apply(op, me) {
   } else if (op.t === 'import' && me.role === 'ceo' && op.state) {
     const s = op.state, now = Date.now();
     ORDER_ROWS = null;
-    replace('orders', (s.orders || []).map(function (o) { return [o.id, o.shop, o.status, o.createdAt, now, JSON.stringify(o)]; }));
+    // Les commandes passées dans l'app que l'envoi ne contient pas (arrivées entre-temps) sont gardées.
+    const sent = {}; (s.orders || []).forEach(function (o) { sent[String(o.id)] = 1; });
+    const extra = rows('orders').filter(function (r) { return !sent[String(r.id)] && !parse(r.json, {}).old; }).map(function (r) { return [r.id, r.shop, r.status, r.createdAt, now, r.json]; });
+    replace('orders', (s.orders || []).map(function (o) { return [o.id, o.shop, o.status, o.createdAt, now, JSON.stringify(o)]; }).concat(extra));
     saveShops(s.shops || []);
     const keep = users().filter(function (u) { return u.role === 'ceo'; }), ids = {}; keep.forEach(function (u) { ids[u.id] = 1; });
     saveUsers(keep.concat((s.users || []).filter(function (u) { return u.role !== 'ceo' && !ids[u.id]; })));
     Object.keys(BLOBS).forEach(function (k) { setBlob(k, s[k] || []); });
-    replace('notifs', []);
   }
 }
 function saveUsers(list) {
