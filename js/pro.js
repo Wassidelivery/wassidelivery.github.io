@@ -510,6 +510,26 @@ Object.assign(A, {
       release(o); o.status = 'annule'; o.driver = null; o.reason = 'Boutique supprimée'; o.updatedAt = at; o.history.push({ at, by: U.name, text: 'Annulée : boutique supprimée' }); Remote.push({ t: 'order', o }); });
     S.users = S.users.filter(u => !(u.role === 'marchand' && u.shop === s.name)); S.stock = S.stock.filter(i => i.shop !== s.name); S.dispatch = S.dispatch.filter(x => x.shop !== s.name); S.shops = S.shops.filter(x => x.id !== s.id);
     V.sub = null; V.modal = null; renderModal(); blob('stock', 'dispatch'); syncCfg(); toast('Boutique supprimée', s.name + ' n\'a plus accès à l\'application.'); },
+  // Saisie manuelle d'une livraison déjà faite (comme « Nouvelle opération » de l'ancienne application).
+  'op-add': () => { if (!MONEY()) return; if (!S.shops.length) return toast('Aucune boutique', 'Ajoutez d\'abord une boutique.');
+    const prods = [...new Set(S.stock.map(i => i.product))].sort();
+    form('Saisir une livraison effectuée', [{ k: 'day', l: 'Date de l\'opération', t: 'date', v: V.day || today() }, { k: 'shop', l: 'Marchand', opts: S.shops.slice().sort((a, b) => a.name.localeCompare(b.name)).map(x => [x.name, x.name]), v: V.shop || '' },
+      { k: 'ret', l: 'Résultat', opts: [['', 'Livrée'], ['1', 'Échec / retour client (n\'impacte ni le chiffre ni le solde)']] },
+      { k: 'zone', l: 'Quartier / info client', ph: 'Ex : Aéroport (client xxxx), EXPEDITION MARADI' }, { k: 'product', l: 'Produit', list: prods, ph: 'Choisir ou taper un produit' }, { k: 'qty', l: 'Quantité', n: 1, v: '1' },
+      { k: 'price', l: 'Prix de vente total (marchandise + livraison)', n: 1 }, { k: 'fee', l: 'Frais de livraison Wassi (F)', n: 1 }, { k: 'feeExp', l: 'Frais bus / expédition (F)', n: 1, v: '0' },
+      { k: 'agence', l: 'Agence d\'expédition (facultatif)', ph: 'Ex : Rimbo, STM…' }, { k: 'driver', l: 'Livreur associé', opts: byRole('livreur').map(u => [u.id, u.name]) },
+      { k: 'closer', l: 'Service closing', opts: [['', 'Aucune']].concat(byRole('closeuse').map(u => [u.id, u.name])) }],
+      v => { const ret = !!v.ret, price = num(v.price), fee = num(v.fee), qty = Math.max(1, num(v.qty)), zone = v.zone.trim(), product = v.product.trim();
+        if (!zone || !product) return 'Le quartier et le produit sont obligatoires.';
+        if (!ret && (price <= 0 || !/\d/.test(v.fee))) return 'Entrez le prix de vente et les frais de livraison Wassi.';
+        const day = v.day || today(), at = day === today() ? Date.now() : dayB(day)[0] + 12 * 3600e3, n = 1 + Math.max(1000, ...S.orders.map(o => +String(o.ref).slice(1) || 0));
+        const o = { id: uid('o'), ref: 'W' + n, shop: v.shop, client: zone, phone: '', product, qty, price: ret ? 0 : price, zone, fee: ret ? 0 : fee, feeExp: ret ? 0 : num(v.feeExp), agence: v.agence.trim(), note: '',
+          status: ret ? 'annule' : 'livre', driver: v.driver || null, closer: v.closer || null, createdAt: at, transferred: false, manual: 1,
+          history: [{ at: Date.now(), by: U.name, text: ret ? 'Échec / retour saisi à la main' : 'Livraison saisie à la main' }] };
+        if (ret) o.reason = 'Retour'; else { Object.assign(o, { deliveredAt: at, validatedAt: at, cashIn: at, feeSet: true }); consume(o); }
+        S.orders.push(o); V.day = day; Remote.push({ t: 'order', o }); blob('stock', 'takes'); persist();
+        toast(ret ? 'Retour enregistré' : 'Livraison enregistrée', ret ? `${v.shop} · ${product}` : `${v.shop} · ${product} × ${qty} · gain boutique ${F(o.price - wfee(o))}`); },
+      { ok: 'Valider l\'opération', note: 'La livraison est comptée tout de suite : stock de la boutique diminué, solde de la boutique et caisse Wassi mis à jour. Avec un service closing, 1 000 F de closing s\'ajoutent aux frais.' }); },
   'fee-ok': d => { const o = order(d.id); if (!o || !MONEY()) return; o.feeSet = true; commit(o, 'Frais validés : ' + F(wfee(o))); },
   'fee-all': () => { const l = feePending(); if (!MONEY() || !l.length) return; ask(`Valider les frais proposés pour ${l.length} livraison(s) ?`, () => {
     l.forEach(o => { o.feeSet = true; o.history.push({ at: Date.now(), by: U.name, text: 'Frais validés : ' + F(wfee(o)) }); o.updatedAt = Date.now(); Remote.push({ t: 'order', o }); }); persist(); render(); toast('Frais validés', l.length + ' livraison(s) ajoutée(s) aux soldes des boutiques.'); }, { ok: 'Tout valider' }); },

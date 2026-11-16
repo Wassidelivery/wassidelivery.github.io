@@ -34,6 +34,7 @@ function renderCountry() {
     </div></div></div>`;
 }
 function renderAuth() {
+  render.auth = V.auth;                          // tant que cet écran est affiché, une mise à jour en arrière-plan ne le redessine pas
   const a = V.auth, h = new Date().getHours(), hi = h < 12 ? 'Bonjour' : h < 18 ? 'Bon après-midi' : 'Bonsoir';
   const msg = a.msg ? `<div class="auth-msg ${a.good ? 'good' : ''}">${ico(a.good ? 'check' : 'alert')}<span>${esc(a.msg)}</span></div>` : '';
   const back = `<button class="btn line block" data-a="back">${ico('back')} Retour</button>`;

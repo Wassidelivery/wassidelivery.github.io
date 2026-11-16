@@ -467,6 +467,31 @@ function diag() {
     if (r.every(function (x) { return x.getResponseCode() === 200; })) PropertiesService.getScriptProperties().deleteProperty('rest_off');
   });
 }
+// Colonne du téléphone du client : d'abord un titre qui parle de téléphone, ensuite seulement un « numéro »
+// qui n'est ni un numéro de commande ni un numéro de suivi.
+function phoneCol(h) {
+  const not = /commande|order|suivi|track|ref|facture|ligne|n° ?id|\bid\b/;
+  let i = col(h, /t[ée]l|phone|whatsapp|mobile|portable|gsm|cellul/, /commande|order/);
+  if (i < 0) i = col(h, /contact/, not);
+  if (i < 0) i = col(h, /num[ée]ro|^n[°o]\b|number/, not);
+  return i;
+}
+// À lancer à la main : remet le bon téléphone sur les commandes déjà arrivées des Sheets (pays par pays).
+function repairPhones() {
+  eachCountry(function (c) {
+    const byShop = {}; linkedShops().forEach(function (s) { byShop[String(s.name)] = s; });
+    const sh = tab('orders'), n = sh.getLastRow(); if (n < 2) return;
+    const vals = sh.getRange(2, 1, n - 1, 6).getValues(), cache = {}; let fixed = 0;
+    vals.forEach(function (r, i) {
+      const o = parse(r[5], null); if (!o || !o.sheetRow || o.old || !byShop[o.shop]) return;
+      if (!cache[o.shop]) { try { const ms = merchantSheet(byShop[o.shop]), w = ms.getLastColumn(), last = ms.getLastRow(); cache[o.shop] = { col: phoneCol(ms.getRange(1, 1, 1, w).getValues()[0]), rows: last > 1 ? ms.getRange(1, 1, last, w).getDisplayValues() : [] }; } catch (err) { cache[o.shop] = { col: -1, rows: [] }; } }
+      const k = cache[o.shop], row = k.rows[o.sheetRow - 1]; if (k.col < 0 || !row) return;
+      const phone = String(row[k.col] || '').trim(); if (!phone || phone === o.phone) return;
+      o.phone = phone; sh.getRange(i + 2, 5, 1, 2).setValues([[Date.now(), JSON.stringify(o)]]); fixed++;
+    });
+    console.log(c + ' : ' + fixed + ' téléphone(s) corrigé(s)');
+  });
+}
 function toTime(v) {                              // date d'une cellule : vraie date, « 12/11/2026 » ou « 2026-11-12 »
   if (v instanceof Date) return v.getTime();
   const s = String(v || ''); let m = s.match(/(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})/);
@@ -491,7 +516,7 @@ function importShop(shop, next, pre) {
   }
   const c = {
     product: col(h, /produit|product|article/), client: col(h, /nom|client|name/, /produit|product|article/),
-    phone: col(h, /t[ée]l|num[ée]ro|phone|contact|whatsapp/), price: col(h, /prix|montant|total|price/),
+    phone: phoneCol(h), price: col(h, /prix|montant|total|price/),
     zone: col(h, /quartier|adresse|lieu|zone|ville|address/), qty: col(h, /quantit|qt[ée]|qty/), sexe: col(h, /sexe|genre/),
     date: col(h, /date|jour|horodat|timestamp/)
   };

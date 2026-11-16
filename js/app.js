@@ -465,7 +465,8 @@ function render() {
   V.replay = false;
   if (!localStorage.getItem('wassi.country')) return renderCountry();
   if (U && !U.preview) { const me = user(U.id); if (!me || me.status === 'pending' || me.gone) kick('Votre accès a été retiré. Contactez le CEO de Wassi Delivery.'); else U = me; }
-  if (!U) return renderAuth();
+  if (!U) { if (render.auth === V.auth && $('.login .panel')) return; render.auth = V.auth; return renderAuth(); }
+  render.auth = null;
   const tabs = TABS[U.role]; if (!tabs.some(t => t[0] === V.tab)) V.tab = tabs[0][0];
   const act = document.activeElement, fid = act && act.id, pos = fid && act.selectionStart;
   const nb = unread(), many = tabs.length > 5, extraOn = many && tabs.findIndex(t => t[0] === V.tab) > 3;
@@ -618,7 +619,7 @@ function renderModal() {
       <div class="grow"><b>${esc(n.title)}</b><small>${esc(n.text)}</small></div><small class="num" style="color:var(--ink-3)">${ago(n.at)}</small></div>`).join('') : empty('Aucune notification')}`; }
   if (m.t === 'form') body = `<div class="sheet-head"><h3>${esc(m.title)}</h3>${closeBtn()}</div>${m.fields.map(f => `<label class="field"><span>${esc(f.l)}</span>${f.opts ?
       `<select class="input" data-f="${f.k}">${f.opts.map(([v, t]) => `<option value="${esc(v)}" ${String(v) === String(f.v ?? '') ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select>` :
-      `<input class="input" data-f="${f.k}" value="${esc(f.v || '')}" placeholder="${esc(f.ph || '')}" type="${f.t || 'text'}" ${f.n ? 'inputmode="numeric"' : ''} autocomplete="${f.t === 'password' ? 'new-password' : 'off'}">${f.t === 'password' ? eyeBtn : ''}`}</label>`).join('')}
+      `<input class="input" data-f="${f.k}" value="${esc(f.v || '')}" placeholder="${esc(f.ph || '')}" type="${f.t || 'text'}" ${f.list ? `list="dl-${f.k}"` : ''} ${f.n ? 'inputmode="numeric"' : ''} autocomplete="${f.t === 'password' ? 'new-password' : 'off'}">${f.t === 'password' ? eyeBtn : ''}${f.list ? `<datalist id="dl-${f.k}">${f.list.map(x => `<option value="${esc(x)}">`).join('')}</datalist>` : ''}`}</label>`).join('')}
     ${m.note ? `<p class="hint" style="margin-top:10px;color:var(--ink-2);font-size:13px">${esc(m.note)}</p>` : ''}
     <div class="actions fill" style="margin-top:16px"><button class="btn line" data-a="back">Retour</button><button class="btn primary" data-a="form-ok">${esc(m.ok || 'Enregistrer')}</button></div>`;
   if (m.t === 'html') body = `<div class="sheet-head"><h3>${esc(m.title)}</h3>${closeBtn()}</div>${m.html()}`;

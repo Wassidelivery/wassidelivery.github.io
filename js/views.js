@@ -95,7 +95,7 @@ function resumeView() {
   const wait = S.orders.filter(o => o.status === 'livre_livreur').length, run = S.orders.filter(o => o.status === 'assigne').length;
   const people = f => { const g = group(l, f).sort((x, y) => y.n - x.n); return g.length ? g.map((x, i) => lrow(esc(uname(x.k)), `${sp(x.cash)} F encaissés`, `<b class="num">${x.n} livraison${x.n > 1 ? 's' : ''}</b>`, av(uname(x.k), i))).join('') : empty('Aucune livraison'); };
   return (isToday ? hero(`${base.length} livraison(s) validée(s) aujourd'hui · ${run} en cours · ${wait} à valider par les closeuses.`, teamDone(), GOAL()) : '') +
-    head('Résumé du jour', 'Tout ce qui a été livré, par qui, pour qui', `<div class="actions"><button class="btn" data-a="dep-add">${ico('plus')} Dépense</button><button class="btn primary" data-a="eod-day">${ico('doc')} Résumé à envoyer</button></div>`) +
+    head('Résumé du jour', 'Tout ce qui a été livré, par qui, pour qui', `<div class="actions"><button class="btn primary" data-a="op-add">${ico('plus')} Saisir une livraison</button><button class="btn" data-a="dep-add">${ico('plus')} Dépense</button><button class="btn" data-a="eod-day">${ico('doc')} Résumé à envoyer</button></div>`) +
     feeQueue() + '<div style="height:14px"></div>' + dayPicker() + shopChips(base) +
     `<div class="kpis" style="margin:14px 0">${kpi('Livraisons', l.length, V.shop || 'toutes les boutiques', true)}${kpi('Ventes encaissées', F(ventes))}${kpi('Frais Wassi', F(frais))}${kpi('Gain des boutiques', F(ventes - frais))}${kpi('Dépenses du jour', F(sum(dep, m => m.amt)), dep.length + ' ligne(s)')}</div>
     <div class="grid g-2">${box('Livreurs', people(o => o.driver))}${box('Closeuses', people(o => o.closer))}</div>
@@ -103,7 +103,7 @@ function resumeView() {
       <button class="btn" data-a="copy" ${l.length ? '' : 'disabled'}>Copier</button><button class="btn" data-a="csv" ${l.length ? '' : 'disabled'}>Excel / CSV</button>
       ${V.shop ? `<button class="btn primary" data-a="report" data-id="${esc(V.shop)}">${ico('doc')} Rapport ${esc(V.shop)}</button>` : ''}</div>` +
     (l.length ? `<div class="table-wrap"><table><thead><tr><th>Heure</th><th>Boutique</th><th>Produit</th><th>Lieu</th><th class="r">Montant</th><th class="r">Frais Wassi</th><th>Livreur</th><th>Closeuse</th></tr></thead><tbody>
-      ${l.slice(0, 300).map(o => `<tr data-a="open" data-id="${esc(o.id)}"><td class="num">${o.old ? '—' : hm(actT(o))}</td><td><span class="tag">${esc(o.shop)}</span></td><td>${esc(o.product)}${o.qty > 1 ? ' × ' + o.qty : ''}</td><td>${esc(o.zone)}</td>
+      ${l.slice(0, 300).map(o => `<tr data-a="open" data-id="${esc(o.id)}"><td class="num">${o.old || o.manual ? '—' : hm(actT(o))}</td><td><span class="tag">${esc(o.shop)}</span></td><td>${esc(o.product)}${o.qty > 1 ? ' × ' + o.qty : ''}</td><td>${esc(o.zone)}</td>
         <td class="r num"><b>${fmt(o.price)}</b></td><td class="r num">${feeOk(o) ? fmt(wfee(o)) : '<span class="badge st-check">à préciser</span>'}</td><td>${esc(uname(o.driver))}</td><td>${esc(uname(o.closer))}</td></tr>`).join('')}</tbody></table></div>` : empty('Aucune livraison ce jour-là', 'Les livraisons validées par les closeuses arrivent ici automatiquement.')) + '</div>';
 }
 function reportsView() {
